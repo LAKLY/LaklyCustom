@@ -3,56 +3,74 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<link rel="icon" href="data:,">
 <title>LaklyCustom</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/style.css?v=1.0.1">
 <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
 
-<div id="join-screen" class="screen active">
-  <div class="panel">
-    <div class="logo">◆</div>
-    <h1>LaklyCustom</h1>
-    <p class="sub">Введите имя, чтобы войти в комнату</p>
-    <input id="player-name" placeholder="Ваш ник" maxlength="20" autofocus>
-    <button id="btn-join" class="btn btn-primary">Войти</button>
-    <div id="join-error" class="error"></div>
-  </div>
-</div>
+<!-- ═══════════ JOIN ═══════════ -->
+<div id="join-screen" class="screen">
+  <div class="join-card">
+    <img class="join-nika" src="/assets/nika/nika-welcome.png" alt=""
+         onerror="this.style.display='none'">
+    <h1 class="join-room-name" id="join-room-title">LaklyCustom</h1>
+    <p class="join-sub">Введите имя — и вы в комнате</p>
 
-<div id="room-screen" class="screen">
-  <header class="topbar">
-    <span class="topbar-title">Комната</span>
-    <span id="player-self" class="self"></span>
-  </header>
-
-  <section class="block">
-    <h3>Игроки <span id="count" class="badge">0</span></h3>
-    <div id="players" class="players"><div class="empty">Пока никого</div></div>
-  </section>
-
-  <section class="game-block" id="game-block" style="display:none">
-    <iframe id="game-frame" sandbox="allow-scripts allow-same-origin allow-forms" style="width:100%;height:60vh;border:0;border-radius:8px;background:var(--panel)"></iframe>
-  </section>
-
-  <section class="block chat-block">
-    <h3>Чат</h3>
-    <div id="chat" class="chat"></div>
-    <div class="chat-input">
-      <input id="chat-input" placeholder="Сообщение..." maxlength="200">
-      <button id="btn-send" class="btn btn-primary">→</button>
+    <div class="join-form">
+      <input id="player-name" placeholder="Ваш ник" maxlength="20" autofocus autocomplete="off">
+      <button id="btn-join" class="btn-join">Войти в комнату</button>
+      <div id="join-error" class="error"></div>
     </div>
-  </section>
-</div>
 
-<div id="closed-screen" class="screen">
-  <div class="panel">
-    <h1>Комната закрыта</h1>
-    <p class="sub">Хост завершил сессию</p>
+    <div class="join-footer">
+      <img src="/assets/icon/icon-64.png" alt="" onerror="this.style.display='none'">
+      <span>LaklyCustom · играем вместе</span>
+    </div>
   </div>
 </div>
 
-<script src="/client.js"></script>
+<!-- ═══════════ ROOM ═══════════ -->
+<div id="room-screen" class="screen" hidden>
+  <div class="guest-app">
+    <header class="guest-header">
+      <div class="guest-brand">
+        <img src="/assets/icon/icon-64.png" alt="" onerror="this.style.display='none'">
+        <span>LaklyCustom</span>
+      </div>
+      <span class="guest-self" id="player-self"></span>
+    </header>
+
+    <div class="guest-players" id="players">
+      <div class="muted-text" style="padding:8px 0;font-size:12px;">Пока никого</div>
+    </div>
+
+    <div class="guest-game" id="game-block" hidden>
+      <iframe id="game-frame" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+    </div>
+
+    <div class="guest-chat">
+      <div id="chat" class="chat-list">
+        <div class="muted-text">Сообщений пока нет</div>
+      </div>
+      <div class="chat-input-row">
+        <input id="chat-input" placeholder="Написать сообщение…" maxlength="200">
+        <button id="btn-send">→</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ CLOSED ═══════════ -->
+<div id="closed-screen" class="screen" hidden>
+  <div class="closed-card">
+    <img src="/assets/nika/nika-sleep.png" alt="" onerror="this.style.display='none'">
+    <h1>Комната закрыта</h1>
+    <p>Хост завершил сессию</p>
+  </div>
+</div>
+
+<script src="/client.js?v=1.0.1"></script>
 </body>
 </html>

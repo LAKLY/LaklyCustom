@@ -328,7 +328,7 @@ export async function startServer({
       const p = room.players.get(socket.id);
       const isHost = socket.id === room.hostSocketId;
       if (!p && !isHost) return;
-      room.addMessage(p?.name || 'Хост', p?.color || '#00F5FF', text);
+      room.addMessage(p?.name || 'Хост', p?.color || '#E5384F', text);
     });
 
     socket.on('host:start-game', async (payload = {}) => {

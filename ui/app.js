@@ -2,7 +2,7 @@
 const socket = io();
 const $ = id => document.getElementById(id);
 
-// --- Навигация ---
+// ═══════════ НАВИГАЦИЯ ═══════════
 document.querySelectorAll('.nav-item').forEach(btn => {
   btn.onclick = () => {
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
@@ -12,6 +12,7 @@ document.querySelectorAll('.nav-item').forEach(btn => {
   };
 });
 
+// ═══════════ ССЫЛКИ НА DOM ═══════════
 const statusDot     = $('status-dot');
 const statusText    = $('status-text');
 const btnStart      = $('btn-start');
@@ -30,36 +31,70 @@ const gameFrameWrap = $('game-frame-wrap');
 const gameStatus    = $('game-status');
 const btnGameStart  = $('btn-game-start');
 const btnGameStop   = $('btn-game-stop');
-const dropZone      = $('drop-zone');
+const pluginsGrid   = $('plugins-grid');
 const btnInstallPlugin = $('btn-install-plugin');
+const pluginAddTile = $('plugin-add-tile');
+const dropOverlay   = $('drop-overlay');
 
-const modeRadios      = document.querySelectorAll('input[name="room-mode"]');
-const staticPicker    = $('static-picker');
-const staticDirInput  = $('static-dir');
-const btnPickDir      = $('btn-pick-dir');
-const proxyPicker     = $('proxy-picker');
-const proxyPortInput  = $('proxy-port');
-const btnCheckPort    = $('btn-check-port');
-const btnScanPorts    = $('btn-scan-ports');
-const proxyStatusEl   = $('proxy-status');
+const roomEmpty     = $('room-empty');
+const roomActive    = $('room-active');
+const welcomeScreen = $('welcome-screen');
+const loadingOverlay = $('loading-overlay');
+const loadingText   = $('loading-text');
+const errorModal    = $('error-modal');
+const errorTitle    = $('error-title');
+const errorMessage  = $('error-message');
+const errorClose    = $('error-close');
 
-const welcomeScreen   = $('welcome-screen');
-const btnWelcomeCreate = $('btn-welcome-create');
-const btnWelcomeSkip  = $('btn-welcome-skip');
+const advancedToggle = $('btn-advanced-toggle');
+const advancedPanel  = $('advanced-panel');
+const modeRadios     = document.querySelectorAll('input[name="room-mode"]');
+const staticPicker   = $('static-picker');
+const staticDirInput = $('static-dir');
+const btnPickDir     = $('btn-pick-dir');
+const proxyPicker    = $('proxy-picker');
+const proxyPortInput = $('proxy-port');
+const btnCheckPort   = $('btn-check-port');
+const btnScanPorts   = $('btn-scan-ports');
+const proxyStatusEl  = $('proxy-status');
 
-const advancedToggle  = $('btn-advanced-toggle');
-const advancedPanel   = $('advanced-panel');
+const nikaNotify     = $('nika-notify');
+const nikaMessage    = $('nika-message');
+const nikaImg        = $('nika-img');
 
+// ═══════════ СОСТОЯНИЕ ═══════════
 let messages = [];
 let activePluginName = null;
-let progressTimer = null;
 let lastGameState = null;
-const meAsHost = { playerId: 'host', playerName: 'Хост', playerColor: '#4DC5FF' };
-
-// --- Токен инициализации приложения ---
 let settings = { hasSeenWelcome: false };
+let nikaTimer = null;
 
-// ========== TOAST ==========
+// ═══════════ NIKA ASSISTANT ═══════════
+const NIKA_IMAGES = {
+  welcome: 'nika-welcome.png',
+  idle:    'nika-idle.png',
+  working: 'nika-working.png',
+  alert:   'nika-alert.png',
+  sleep:   'nika-sleep.png',
+};
+
+function showNika(state, message, durationMs = 5000) {
+  const file = NIKA_IMAGES[state] || NIKA_IMAGES.idle;
+  nikaImg.src = `/assets/nika/${file}`;
+  nikaMessage.innerHTML = message;
+  nikaNotify.classList.add('show');
+  clearTimeout(nikaTimer);
+  if (durationMs > 0) {
+    nikaTimer = setTimeout(() => nikaNotify.classList.remove('show'), durationMs);
+  }
+}
+
+function hideNika() {
+  clearTimeout(nikaTimer);
+  nikaNotify.classList.remove('show');
+}
+
+// ═══════════ TOAST ═══════════
 function toast(text) {
   const el = $('toast');
   el.textContent = text;
@@ -68,135 +103,159 @@ function toast(text) {
   el._t = setTimeout(() => el.classList.remove('show'), 2600);
 }
 
-// ========== WELCOME LOGIC ==========
+// ═══════════ MODAL ═══════════
+function showError(title, message) {
+  errorTitle.textContent = title || 'Не получилось';
+  errorMessage.textContent = message || 'Что-то пошло не так.';
+  errorModal.hidden = false;
+}
+errorClose.onclick = () => { errorModal.hidden = true; };
+
+// ═══════════ LOADING ═══════════
+function showLoading(text) {
+  loadingText.textContent = text || 'Открываем комнату…';
+  loadingOverlay.hidden = false;
+}
+function hideLoading() {
+  loadingOverlay.hidden = true;
+}
+
+// ═══════════ WELCOME ═══════════
 async function checkFirstRun() {
   if (!window.lakly?.getSettings) {
-    // В вебе (не Electron) показываем welcome, если localStorage пуст
     const seen = localStorage.getItem('hasSeenWelcome') === '1';
-    if (!seen) {
-      welcomeScreen.hidden = false;
-    }
+    if (!seen) welcomeScreen.hidden = false;
     return;
   }
   try {
     settings = await window.lakly.getSettings();
-    if (!settings.hasSeenWelcome) {
-      welcomeScreen.hidden = false;
-    }
-  } catch (err) {
-    console.error('[welcome]', err);
-  }
+    if (!settings.hasSeenWelcome) welcomeScreen.hidden = false;
+  } catch (err) { console.error('[welcome]', err); }
 }
 
 async function markWelcomeSeen() {
   settings.hasSeenWelcome = true;
   if (window.lakly?.setSettings) {
-    try {
-      await window.lakly.setSettings({ ...settings });
-    } catch (err) { console.error('[welcome:set]', err); }
+    try { await window.lakly.setSettings({ ...settings }); }
+    catch (err) { console.error('[welcome:set]', err); }
   } else {
     localStorage.setItem('hasSeenWelcome', '1');
   }
 }
 
-btnWelcomeCreate.onclick = async () => {
+$('btn-welcome-create').onclick = async () => {
   welcomeScreen.hidden = true;
   await markWelcomeSeen();
-  // Сразу создаём комнату
-  btnStart.click();
+  createRoom();
 };
 
-btnWelcomeSkip.onclick = async () => {
+$('btn-welcome-skip').onclick = async () => {
   welcomeScreen.hidden = true;
   await markWelcomeSeen();
+  showNika('idle', 'Готов, когда ты готов', 4000);
 };
 
-// ========== ADVANCED PANEL ==========
+// ═══════════ ADVANCED PANEL ═══════════
 advancedToggle.onclick = () => {
-  const isOpen = advancedPanel.dataset.open === 'true';
-  advancedPanel.dataset.open = isOpen ? 'false' : 'true';
-  advancedToggle.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+  const isOpen = !advancedPanel.hidden;
+  advancedPanel.hidden = isOpen;
+  advancedToggle.textContent = isOpen ? 'Расширенные режимы' : 'Свернуть';
 };
 
-// ========== PROGRESS HINTS ==========
-function startProgressHints() {
-  const hints = ['Готовим сервер…', 'Открываем туннель…', 'Получаем адрес…', 'Проверяем связь…'];
-  let i = 0;
-  statusText.textContent = hints[0];
-  progressTimer = setInterval(() => {
-    i = (i + 1) % hints.length;
-    statusText.textContent = hints[i];
-  }, 2200);
-}
-function stopProgressHints() {
-  if (progressTimer) clearInterval(progressTimer);
-  progressTimer = null;
-}
+modeRadios.forEach(r => {
+  r.addEventListener('change', () => {
+    const mode = document.querySelector('input[name="room-mode"]:checked')?.value;
+    staticPicker.hidden = mode !== 'static';
+    proxyPicker.hidden = mode !== 'proxy';
+  });
+});
 
-// ========== PLUGINS ==========
-function makeOption(value, label) {
-  const opt = document.createElement('option');
-  opt.value = value;
-  opt.textContent = label;
-  return opt;
-}
+btnPickDir.onclick = async () => {
+  if (!window.lakly?.pickDirectory) { toast('Диалог недоступен'); return; }
+  const dir = await window.lakly.pickDirectory();
+  if (dir) { staticDirInput.value = dir; toast('Папка выбрана'); }
+};
 
-async function loadPlugins() {
-  const listEl = $('plugins-list');
+// ═══════════ PROXY CHECK ═══════════
+btnCheckPort.onclick = async () => {
+  const port = Number(proxyPortInput.value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    proxyStatusEl.textContent = 'Некорректный порт';
+    proxyStatusEl.style.color = 'var(--danger)';
+    return;
+  }
+  proxyStatusEl.textContent = 'Проверяем…';
+  proxyStatusEl.style.color = 'var(--text-3)';
   try {
-    const r = await fetch('/api/plugins');
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const r = await fetch('/api/proxy/check', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ port }),
+    });
     const j = await r.json();
-
-    pluginSelect.innerHTML = '';
-    pluginSelect.append(makeOption('', '— Без плагина (только чат) —'));
-    for (const p of j.plugins) {
-      pluginSelect.append(makeOption(p.id, `${p.name} — ${p.description || ''}`));
+    if (j.ok) {
+      const info = [];
+      if (j.hint) info.push(j.hint);
+      if (j.probe?.status) info.push(`HTTP ${j.probe.status}`);
+      if (j.probe?.title) info.push(`«${j.probe.title}»`);
+      proxyStatusEl.textContent = `✓ Порт ${j.port} отвечает${info.length ? ' — ' + info.join(' · ') : ''}`;
+      proxyStatusEl.style.color = 'var(--success)';
+    } else {
+      proxyStatusEl.textContent = `✗ ${j.error || 'Не отвечает'}`;
+      proxyStatusEl.style.color = 'var(--danger)';
     }
+  } catch (e) {
+    proxyStatusEl.textContent = 'Ошибка: ' + e.message;
+    proxyStatusEl.style.color = 'var(--danger)';
+  }
+};
 
-    listEl.innerHTML = '';
-    if (!j.plugins.length) {
-      listEl.innerHTML = `
-        <div class="empty-nika">
-          <img src="/assets/nika/nika-welcome.png" alt="" onerror="this.style.display='none'">
-          <p>Установите первый плагин, чтобы начать</p>
-        </div>`;
+btnScanPorts.onclick = async () => {
+  proxyStatusEl.textContent = 'Сканируем…';
+  proxyStatusEl.style.color = 'var(--text-3)';
+  try {
+    const r = await fetch('/api/proxy/scan');
+    const j = await r.json();
+    if (!j.ports?.length) {
+      proxyStatusEl.textContent = 'Ничего не найдено';
+      proxyStatusEl.style.color = 'var(--text-3)';
       return;
     }
-    for (const p of j.plugins) {
-      const item = document.createElement('div');
-      item.className = 'plugin-item';
-      const nameEl = document.createElement('div');
-      nameEl.className = 'plugin-name';
-      nameEl.textContent = p.name;
-      const verEl = document.createElement('div');
-      verEl.className = 'plugin-version';
-      verEl.textContent = `v${p.version}`;
-      const descEl = document.createElement('div');
-      descEl.className = 'plugin-desc';
-      descEl.textContent = p.description || '';
-      item.append(nameEl, verEl, descEl);
-      listEl.append(item);
-    }
-  } catch (err) {
-    console.error('[loadPlugins]', err);
-    listEl.innerHTML = '';
-    const empty = document.createElement('div');
-    empty.className = 'empty';
-    empty.textContent = 'Не удалось загрузить список плагинов';
-    listEl.append(empty);
+    proxyStatusEl.innerHTML = '';
+    const label = document.createElement('span');
+    label.textContent = 'Найдено: ';
+    proxyStatusEl.append(label);
+    j.ports.forEach((p, i) => {
+      if (i > 0) proxyStatusEl.append(document.createTextNode(', '));
+      const a = document.createElement('a');
+      a.href = '#';
+      a.style.color = 'var(--live)';
+      a.style.textDecoration = 'underline';
+      a.style.cursor = 'pointer';
+      a.textContent = `:${p.port}${p.hint ? ' (' + p.hint + ')' : ''}`;
+      a.onclick = (ev) => {
+        ev.preventDefault();
+        proxyPortInput.value = p.port;
+        btnCheckPort.click();
+      };
+      proxyStatusEl.append(a);
+    });
+    proxyStatusEl.style.color = 'var(--success)';
+  } catch (e) {
+    proxyStatusEl.textContent = 'Ошибка: ' + e.message;
+    proxyStatusEl.style.color = 'var(--danger)';
   }
-}
+};
 
-// ========== КНОПКИ ==========
-btnStart.onclick = () => {
+// ═══════════ CREATE ROOM ═══════════
+function createRoom() {
   const mode = document.querySelector('input[name="room-mode"]:checked')?.value || 'default';
 
   if (mode === 'static') {
     const dir = staticDirInput.value;
     if (!dir || dir === 'Папка не выбрана') { toast('Сначала выберите папку'); return; }
     btnStart.disabled = true;
-    startProgressHints();
+    showLoading('Открываем комнату…');
     socket.emit('host:create-room', { roomName: 'Lakly Room', type: 'static', staticDir: dir });
     return;
   }
@@ -207,16 +266,18 @@ btnStart.onclick = () => {
       toast('Введите порт от 1 до 65535'); return;
     }
     btnStart.disabled = true;
-    startProgressHints();
+    showLoading('Открываем комнату…');
     socket.emit('host:create-room', { roomName: 'Lakly Room', type: 'proxy', proxyPort: port });
     return;
   }
 
   btnStart.disabled = true;
-  startProgressHints();
+  showLoading('Открываем комнату…');
   const pluginName = pluginSelect.value || null;
   socket.emit('host:create-room', { roomName: 'Lakly Room', type: 'default', pluginName });
-};
+}
+
+btnStart.onclick = createRoom;
 
 btnStop.onclick = () => {
   if (confirm('Закрыть комнату? Гости отключатся.')) {
@@ -236,13 +297,17 @@ btnJoinGuest.onclick = () => {
 
 btnCopy.onclick = () => {
   navigator.clipboard.writeText(roomUrl.value)
-    .then(() => toast('Скопировано'))
+    .then(() => toast('Ссылка скопирована'))
     .catch(() => toast('Не удалось скопировать'));
 };
 
 btnGameStart.onclick = () => {
-  if (!activePluginName) { toast('Плагин не выбран'); return; }
-  socket.emit('host:start-game', { pluginName: activePluginName });
+  // Берём выбор из селекта, а не из activePluginName.
+  // activePluginName = null, когда комната создана без плагина,
+  // но пользователь уже выбрал игру в селекте — её и надо запускать.
+  const pluginName = pluginSelect.value;
+  if (!pluginName) { toast('Выберите игру'); return; }
+  socket.emit('host:start-game', { pluginName });
 };
 btnGameStop.onclick = () => socket.emit('host:stop-game');
 
@@ -255,36 +320,48 @@ function sendChat() {
   chatInput.value = '';
 }
 
-// ========== SOCKET ==========
+// ═══════════ SOCKET ═══════════
 socket.on('host:room-created', async (data) => {
-  stopProgressHints();
+  hideLoading();
   statusDot.classList.add('on');
   const isPublic = data.provider !== 'local';
-  statusText.textContent = isPublic
-    ? `Комната активна (${data.provider})`
-    : 'Только локальная сеть';
+  statusText.textContent = isPublic ? 'Комната активна' : 'Только локально';
 
   roomUrl.value = data.publicUrl;
+  roomEmpty.hidden = true;
+  roomActive.hidden = false;
+
   btnCopy.disabled = false;
   btnStop.disabled = false;
   btnJoinGuest.disabled = false;
   btnSend.disabled = false;
   chatInput.disabled = false;
 
-  gameFrameWrap.style.display = 'none';
+  gameFrameWrap.hidden = true;
   gameFrame.src = 'about:blank';
 
   if (data.type === 'static') {
     gameStatus.textContent = 'Static-режим';
+    pluginSelect.disabled = true;
     btnGameStart.disabled = true;
-    btnGameStop.disabled = true;
+    btnGameStop.hidden = true;
   } else if (data.type === 'proxy') {
-    gameStatus.textContent = `Прокси → 127.0.0.1:${data.proxyPort || '?'}`;
+    gameStatus.textContent = `Прокси → :${data.proxyPort || '?'}`;
+    pluginSelect.disabled = true;
     btnGameStart.disabled = true;
-    btnGameStop.disabled = true;
+    btnGameStop.hidden = true;
   } else {
-    gameStatus.textContent = 'Игра не запущена';
-    activePluginName = data.activePlugin || null;
+    gameStatus.textContent = 'Не запущена';
+    pluginSelect.disabled = false;
+
+    // Если при создании был выбран плагин — отразим это в селекте,
+    // чтобы пользователь видел какую игру запускать.
+    if (data.activePlugin) {
+      activePluginName = data.activePlugin;
+      pluginSelect.value = data.activePlugin;
+    } else {
+      activePluginName = null;
+    }
     updateGameControls();
   }
 
@@ -297,12 +374,17 @@ socket.on('host:room-created', async (data) => {
   if (isPublic) {
     navigator.clipboard.writeText(data.publicUrl).catch(() => {});
     toast('Ссылка скопирована');
-  } else {
-    toast('Публичный туннель недоступен');
   }
+
+  showNika('working', isPublic
+    ? 'Комната открыта! Отправь друзьям ссылку'
+    : 'Комната работает только локально', 5500);
+});
+socket.on('room:closed', () => {
+  resetUi();
+  showNika('idle', 'Комната закрыта', 4000);
 });
 
-socket.on('room:closed', () => { resetUi(); toast('Комната закрыта'); });
 socket.on('room:updated', ({ players }) => renderPlayers(players));
 socket.on('room:player-joined', refreshPlayers);
 socket.on('room:player-left', refreshPlayers);
@@ -317,16 +399,26 @@ socket.on('game:started', ({ plugin, url }) => {
   activePluginName = plugin;
   gameStatus.textContent = `Игра: ${plugin}`;
   gameFrame.src = url;
-  gameFrameWrap.style.display = 'block';
+  gameFrameWrap.hidden = false;
   lastGameState = null;
+
+  // Синхронизируем селект — на случай, если игра запущена программно
+  // или хост выбрал её в другом окне.
+  if (pluginSelect.value !== plugin) {
+    pluginSelect.value = plugin;
+  }
+
   updateGameControls();
 });
 
 socket.on('game:stopped', () => {
-  gameFrameWrap.style.display = 'none';
+  gameFrameWrap.hidden = true;
   gameFrame.src = 'about:blank';
-  gameStatus.textContent = 'Игра не запущена';
+  gameStatus.textContent = 'Не запущена';
   lastGameState = null;
+  activePluginName = null;
+  // Не сбрасываем pluginSelect.value — пусть пользователь видит,
+  // какую игру он может перезапустить одним кликом.
   updateGameControls();
 });
 
@@ -338,23 +430,24 @@ socket.on('game:state', (data) => {
 });
 
 socket.on('error', (msg) => {
-  toast(typeof msg === 'string' ? msg : 'Ошибка');
-  stopProgressHints();
+  hideLoading();
   btnStart.disabled = false;
+  showError('Не получилось', typeof msg === 'string' ? msg : 'Что-то пошло не так.');
 });
 
 socket.on('disconnect', () => {
   statusDot.classList.remove('on');
-  statusText.textContent = 'Нет связи с сервером';
+  statusText.textContent = 'Нет связи';
+  showError('Потеряна связь', 'Не удаётся подключиться к серверу комнаты.');
 });
 
-// ========== IFRAME MESSAGE ==========
+// ═══════════ IFRAME MESSAGE ═══════════
 window.addEventListener('message', (e) => {
   if (!gameFrame?.contentWindow || e.source !== gameFrame.contentWindow) return;
   if (!e.data || typeof e.data !== 'object') return;
 
   if (e.data.type === 'lakly:ready') {
-    gameFrame.contentWindow.postMessage({ type: 'lakly:init', player: meAsHost }, '*');
+    gameFrame.contentWindow.postMessage({ type: 'lakly:init', player: { playerId: 'host', playerName: 'Хост', playerColor: '#E5384F' } }, '*');
     if (lastGameState) {
       gameFrame.contentWindow.postMessage({ type: 'lakly:state', data: lastGameState }, '*');
     }
@@ -367,7 +460,7 @@ window.addEventListener('message', (e) => {
   }
 });
 
-// ========== RENDER ==========
+// ═══════════ RENDER ═══════════
 async function refreshPlayers() {
   try {
     const r = await fetch('/api/room');
@@ -379,21 +472,20 @@ async function refreshPlayers() {
 function renderPlayers(list) {
   $('player-count').textContent = String(list.length);
   if (!list.length) {
-    playersEl.innerHTML = `
-      <div class="empty-nika">
-        <img src="/assets/nika/nika-sleep.png" alt="" onerror="this.style.display='none'">
-        <p>Отправьте ссылку — и здесь появятся друзья</p>
-      </div>`;
+    playersEl.innerHTML = '<div class="muted-text">Пока никого</div>';
     return;
   }
-  playersEl.innerHTML = list.map(p => `
-    <div class="player">
-      <span class="dot" style="background:${p.color}"></span>
-      <span class="name">${escapeHtml(p.name)}</span>
-      ${p.isHost ? '<span class="tag">HOST</span>'
-                 : `<button class="kick" data-id="${p.id}" title="Исключить">✕</button>`}
-    </div>
-  `).join('');
+  playersEl.innerHTML = list.map(p => {
+    const initial = (p.name || '?').trim().charAt(0).toUpperCase();
+    return `
+      <div class="player">
+        <span class="avatar" style="background:${p.color}">${escapeHtml(initial)}</span>
+        <span class="name">${escapeHtml(p.name)}</span>
+        ${p.isHost ? '<span class="tag">ХОСТ</span>'
+                   : `<button class="kick" data-id="${p.id}" title="Исключить">✕</button>`}
+      </div>
+    `;
+  }).join('');
   playersEl.querySelectorAll('.kick').forEach(b => {
     b.onclick = () => socket.emit('host:kick-player', { playerId: b.dataset.id });
   });
@@ -401,17 +493,13 @@ function renderPlayers(list) {
 
 function renderChat() {
   if (!messages.length) {
-    chatEl.innerHTML = `
-      <div class="empty-nika">
-        <img src="/assets/nika/nika-idle.png" alt="" onerror="this.style.display='none'">
-        <p>Сообщений пока нет</p>
-      </div>`;
+    chatEl.innerHTML = '<div class="muted-text">Сообщений пока нет</div>';
     return;
   }
   chatEl.innerHTML = messages.map(m => `
     <div class="msg">
-      <span class="msg-name" style="color:${m.senderColor}">${escapeHtml(m.sender)}:</span>
-      <span class="msg-text">${escapeHtml(m.text)}</span>
+      <span class="who" style="color:${m.senderColor}">${escapeHtml(m.sender)}</span>
+      <span class="what">${escapeHtml(m.text)}</span>
     </div>
   `).join('');
   chatEl.scrollTop = chatEl.scrollHeight;
@@ -424,44 +512,84 @@ function escapeHtml(s) {
 }
 
 function updateGameControls() {
-  const visible = gameFrameWrap.style.display === 'block';
-  btnGameStart.disabled = !activePluginName || visible;
-  btnGameStop.disabled = !visible;
+  const visible = !gameFrameWrap.hidden;         // игра сейчас запущена
+  const hasSelection = !!pluginSelect.value;     // выбран хоть какой-то плагин
+  const sameAsActive = pluginSelect.value === activePluginName;
+
+  // Кнопка «Запустить»:
+  // — disabled, если ничего не выбрано
+  // — disabled, если игра уже активна и выбран ровно тот же плагин
+  // — enabled во всех остальных случаях (запуск или смена игры)
+  btnGameStart.disabled = !hasSelection || (visible && sameAsActive);
+
+  // Кнопка «Остановить» показывается только когда игра активна
+  btnGameStop.hidden = !visible;
 }
 
 function resetUi() {
-  stopProgressHints();
+  hideLoading();
   statusDot.classList.remove('on');
   statusText.textContent = 'Не запущено';
   btnStart.disabled = false;
-  btnStop.disabled = true;
-  btnJoinGuest.disabled = true;
-  btnCopy.disabled = true;
-  btnSend.disabled = true;
-  chatInput.disabled = true;
+  roomEmpty.hidden = false;
+  roomActive.hidden = true;
   roomUrl.value = '—';
-  qrEl.innerHTML = '<div class="qr-empty">Нажмите «Создать комнату»</div>';
-  playersEl.innerHTML = `
-    <div class="empty-nika">
-      <img src="/assets/nika/nika-sleep.png" alt="" onerror="this.style.display='none'">
-      <p>Отправьте ссылку — и здесь появятся друзья</p>
-    </div>`;
-  chatEl.innerHTML = '';
+  qrEl.innerHTML = '<div class="qr-empty">QR появится здесь</div>';
+  playersEl.innerHTML = '<div class="muted-text">Пока никого</div>';
+  chatEl.innerHTML = '<div class="muted-text">Сообщений пока нет</div>';
   $('player-count').textContent = '0';
   messages = [];
   activePluginName = null;
   lastGameState = null;
-  gameFrameWrap.style.display = 'none';
+  gameFrameWrap.hidden = true;
   gameFrame.src = 'about:blank';
-  gameStatus.textContent = 'Игра не запущена';
+  gameStatus.textContent = 'Не запущена';
   updateGameControls();
-  if (proxyStatusEl) {
-    proxyStatusEl.textContent = '';
-    proxyStatusEl.className = 'proxy-status';
+}
+
+// ═══════════ PLUGINS GRID ═══════════
+async function loadPlugins() {
+  try {
+    const r = await fetch('/api/plugins');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+
+    pluginSelect.innerHTML = '';
+    pluginSelect.append(makeOption('', '— Выбрать игру —'));
+    for (const p of j.plugins) {
+      pluginSelect.append(makeOption(p.id, p.name));
+    }
+
+    // Grid
+    const tiles = pluginsGrid.querySelectorAll('.plugin-card');
+    tiles.forEach(t => t.remove());
+
+    const EMOJI = { clicker: '🎯', quiz: '🧠' };
+
+    for (const p of j.plugins) {
+      const card = document.createElement('div');
+      card.className = 'plugin-card';
+      card.innerHTML = `
+        <div class="plugin-emoji">${EMOJI[p.id] || '🎮'}</div>
+        <div class="plugin-name">${escapeHtml(p.name)}</div>
+        <div class="plugin-desc">${escapeHtml(p.description || '')}</div>
+        <div class="plugin-meta">v${escapeHtml(p.version)}</div>
+      `;
+      pluginsGrid.insertBefore(card, pluginAddTile);
+    }
+  } catch (err) {
+    console.error('[loadPlugins]', err);
   }
 }
 
-// ========== SETTINGS ==========
+function makeOption(value, label) {
+  const opt = document.createElement('option');
+  opt.value = value;
+  opt.textContent = label;
+  return opt;
+}
+
+// ═══════════ SETTINGS ═══════════
 async function loadSettings() {
   if (!window.lakly) return;
   try {
@@ -486,109 +614,26 @@ $('btn-save-settings').onclick = async () => {
   toast('Сохранено. Перезапустите приложение.');
 };
 
-// ========== MODE SWITCH ==========
-modeRadios.forEach(r => {
-  r.addEventListener('change', () => {
-    const mode = document.querySelector('input[name="room-mode"]:checked')?.value;
-    staticPicker.style.display = mode === 'static' ? 'block' : 'none';
-    proxyPicker.style.display = mode === 'proxy' ? 'block' : 'none';
-  });
-});
-
-btnPickDir.onclick = async () => {
-  if (!window.lakly?.pickDirectory) { toast('Диалог недоступен'); return; }
-  const dir = await window.lakly.pickDirectory();
-  if (dir) {
-    staticDirInput.value = dir;
-    toast('Папка выбрана');
-  }
-};
-
-// ========== PROXY CHECK ==========
-btnCheckPort.onclick = async () => {
-  const port = Number(proxyPortInput.value);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    proxyStatusEl.textContent = 'Некорректный порт';
-    proxyStatusEl.className = 'proxy-status err';
-    return;
-  }
-  proxyStatusEl.textContent = 'Проверяем…';
-  proxyStatusEl.className = 'proxy-status';
-  try {
-    const r = await fetch('/api/proxy/check', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ port }),
-    });
-    const j = await r.json();
-    if (j.ok) {
-      const info = [];
-      if (j.hint) info.push(j.hint);
-      if (j.probe?.status) info.push(`HTTP ${j.probe.status}`);
-      if (j.probe?.title) info.push(`«${j.probe.title}»`);
-      proxyStatusEl.textContent = `✓ Порт ${j.port} отвечает${info.length ? ' — ' + info.join(' · ') : ''}`;
-      proxyStatusEl.className = 'proxy-status ok';
-    } else {
-      proxyStatusEl.textContent = `✗ ${j.error || 'Не отвечает'}`;
-      proxyStatusEl.className = 'proxy-status err';
-    }
-  } catch (e) {
-    proxyStatusEl.textContent = 'Ошибка: ' + e.message;
-    proxyStatusEl.className = 'proxy-status err';
-  }
-};
-
-btnScanPorts.onclick = async () => {
-  proxyStatusEl.textContent = 'Сканируем…';
-  proxyStatusEl.className = 'proxy-status';
-  try {
-    const r = await fetch('/api/proxy/scan');
-    const j = await r.json();
-    if (!j.ports?.length) {
-      proxyStatusEl.textContent = 'Ничего не найдено';
-      proxyStatusEl.className = 'proxy-status err';
-      return;
-    }
-    proxyStatusEl.innerHTML = '';
-    const label = document.createElement('span');
-    label.textContent = 'Найдено: ';
-    proxyStatusEl.append(label);
-    j.ports.forEach((p, i) => {
-      if (i > 0) proxyStatusEl.append(document.createTextNode(', '));
-      const a = document.createElement('a');
-      a.href = '#';
-      a.textContent = `:${p.port}${p.hint ? ' (' + p.hint + ')' : ''}`;
-      a.onclick = (ev) => {
-        ev.preventDefault();
-        proxyPortInput.value = p.port;
-        btnCheckPort.click();
-      };
-      proxyStatusEl.append(a);
-    });
-    proxyStatusEl.className = 'proxy-status ok';
-  } catch (e) {
-    proxyStatusEl.textContent = 'Ошибка: ' + e.message;
-    proxyStatusEl.className = 'proxy-status err';
-  }
-};
-
-// ========== DRAG & DROP ==========
+// ═══════════ DRAG & DROP ═══════════
 let dragCounter = 0;
 document.addEventListener('dragenter', (e) => {
   e.preventDefault();
   dragCounter++;
-  dropZone.classList.add('active');
+  dropOverlay.classList.add('active');
 });
 document.addEventListener('dragleave', (e) => {
   e.preventDefault();
   dragCounter--;
-  if (dragCounter <= 0) { dragCounter = 0; dropZone.classList.remove('active'); }
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    dropOverlay.classList.remove('active');
+  }
 });
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', async (e) => {
   e.preventDefault();
   dragCounter = 0;
-  dropZone.classList.remove('active');
+  dropOverlay.classList.remove('active');
 
   const files = e.dataTransfer.files;
   if (!files.length) return;
@@ -601,13 +646,13 @@ document.addEventListener('drop', async (e) => {
   try {
     const result = await window.lakly.installPluginZip(path);
     if (result.ok) { toast(`Плагин «${result.plugin}» установлен`); await loadPlugins(); }
-    else { toast('Ошибка: ' + result.error); }
+    else { showError('Ошибка установки', result.error); }
   } catch (err) {
-    toast('Ошибка: ' + err.message);
+    showError('Ошибка установки', err.message);
   }
 });
 
-btnInstallPlugin.onclick = () => {
+function installPluginFromDialog() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.zip';
@@ -618,12 +663,48 @@ btnInstallPlugin.onclick = () => {
     if (!path) { toast('Не удалось получить путь'); return; }
     const result = await window.lakly.installPluginZip(path);
     if (result.ok) { toast(`Плагин «${result.plugin}» установлен`); await loadPlugins(); }
-    else { toast('Ошибка: ' + result.error); }
+    else { showError('Ошибка установки', result.error); }
   };
   input.click();
-};
+}
 
-// ========== TRAY ==========
+btnInstallPlugin.onclick = installPluginFromDialog;
+pluginAddTile.onclick = installPluginFromDialog;
+
+// ═══════════ СМЕНА ИГРЫ ВО ВРЕМЯ АКТИВНОЙ КОМНАТЫ ═══════════
+pluginSelect.addEventListener('change', () => {
+  const newPlugin = pluginSelect.value;
+
+  // Если игра не запущена — просто обновляем кнопку
+  if (gameFrameWrap.hidden) {
+    updateGameControls();
+    return;
+  }
+
+  // Если выбрали «— Выбрать игру —» при активной игре — останавливаем
+  if (!newPlugin) {
+    socket.emit('host:stop-game');
+    return;
+  }
+
+  // Если выбрали тот же плагин, что сейчас активен — ничего не делаем
+  if (newPlugin === activePluginName) return;
+
+  // Смена игры: сервер сам остановит старую и запустит новую.
+  // (На сервере это делает Room.startGame — см. core/room.js)
+  const newName = getPluginNameFromSelect(newPlugin);
+  toast(`Смена игры: ${newName}`);
+  socket.emit('host:start-game', { pluginName: newPlugin });
+});
+
+function getPluginNameFromSelect(id) {
+  const opt = pluginSelect.querySelector(`option[value="${CSS.escape(id)}"]`);
+  if (!opt) return id;
+  // Формат опции: "Quiz — 5 вопросов с ответами" → берём до тире
+  return opt.textContent.split(' — ')[0].trim() || id;
+}
+
+// ═══════════ TRAY ═══════════
 if (window.lakly?.onTrayCloseRoom) {
   window.lakly.onTrayCloseRoom(() => {
     if (!btnStop.disabled) socket.emit('host:close-room');
@@ -635,7 +716,7 @@ if (window.lakly?.onTrayCreateRoom) {
   });
 }
 
-// ========== STARTUP ==========
+// ═══════════ СТАРТ ═══════════
 window.addEventListener('load', async () => {
   await checkFirstRun();
   loadSettings();

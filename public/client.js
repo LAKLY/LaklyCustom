@@ -7,39 +7,78 @@ let messages = [];
 let activeGame = null;
 let lastGameState = null;
 
-function show(name) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  $(name).classList.add('active');
+/**
+ * Переключение экранов через атрибут hidden.
+ * hidden=false — экран виден, hidden=true — скрыт.
+ */
+function show(screenId) {
+  ['join-screen', 'room-screen', 'closed-screen'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = (id !== screenId);
+  });
+}
+
+// Явно показываем join при загрузке, независимо от HTML
+show('join-screen');
+
+async function loadRoomPreview() {
+  try {
+    const r = await fetch('/api/room');
+    const j = await r.json();
+    if (j.isActive && j.roomName) {
+      const el = $('join-room-title');
+      if (el) el.textContent = j.roomName;
+    }
+  } catch {}
 }
 
 function join() {
-  const name = $('player-name').value.trim();
-  if (!name) { $('join-error').textContent = 'Введите имя'; return; }
+  const input = $('player-name');
+  const name = (input?.value || '').trim();
+  if (!name) {
+    $('join-error').textContent = 'Введите имя';
+    input?.focus();
+    return;
+  }
   $('join-error').textContent = '';
   socket.emit('player:join', { playerName: name, token: joinToken });
 }
 
 $('btn-join').onclick = join;
-$('player-name').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
+$('player-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); join(); }
+});
+
 $('btn-send').onclick = send;
-$('chat-input').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+$('chat-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); send(); }
+});
 
 function send() {
-  const t = $('chat-input').value.trim();
+  const t = ($('chat-input').value || '').trim();
   if (!t) return;
   socket.emit('chat:message', { text: t });
   $('chat-input').value = '';
 }
 
+// ═══════════ SOCKET ═══════════
+socket.on('connect', () => {
+  console.log('[guest] socket connected');
+  // Убедимся, что при реконнекте мы всё ещё на join-screen,
+  // если ещё не зашли в комнату
+  if (!me) show('join-screen');
+});
+
 socket.on('player:joined-success', (data) => {
+  console.log('[guest] joined successfully', data);
   me = data;
-  $('player-self').textContent = data.playerName;
-  $('player-self').style.color = data.playerColor;
+  $('player-self').textContent = data.playerName || '—';
+  $('player-self').style.color = data.playerColor || 'inherit';
   show('room-screen');
   if (data.gameActive && data.activePlugin) showGame(data.activePlugin);
 });
 
-socket.on('room:updated', ({ players }) => renderPlayers(players));
+socket.on('room:updated', ({ players }) => renderPlayers(players || []));
 socket.on('room:player-joined', refresh);
 socket.on('room:player-left', refresh);
 
@@ -49,11 +88,19 @@ socket.on('chat:new-message', (msg) => {
   renderChat();
 });
 
-socket.on('room:closed', () => show('closed-screen'));
-socket.on('player:kicked', () => { alert('Вас исключили из комнаты'); show('closed-screen'); });
-socket.on('error', (msg) => { $('join-error').textContent = typeof msg === 'string' ? msg : 'Ошибка'; });
+socket.on('room:closed', () => { me = null; show('closed-screen'); });
+socket.on('player:kicked', () => {
+  alert('Вас исключили из комнаты');
+  me = null;
+  show('closed-screen');
+});
+socket.on('error', (msg) => {
+  console.log('[guest] server error:', msg);
+  $('join-error').textContent = typeof msg === 'string' ? msg : 'Ошибка';
+  // Не переключаем экран — остаёмся на join, чтобы пользователь мог исправить
+});
 
-// --- Игра ---
+// ═══════════ GAME ═══════════
 socket.on('game:started', ({ plugin, url }) => showGame(plugin, url));
 socket.on('game:stopped', () => hideGame());
 
@@ -70,13 +117,13 @@ function showGame(plugin, url) {
   const block = $('game-block');
   const frame = $('game-frame');
   frame.src = url || `/plugins/${plugin}/game.html`;
-  block.style.display = 'block';
+  block.hidden = false;
 }
 
 function hideGame() {
   activeGame = null;
   lastGameState = null;
-  $('game-block').style.display = 'none';
+  $('game-block').hidden = true;
   $('game-frame').src = 'about:blank';
 }
 
@@ -99,7 +146,7 @@ window.addEventListener('message', (e) => {
   }
 });
 
-// --- Рендер ---
+// ═══════════ RENDER ═══════════
 async function refresh() {
   try {
     const r = await fetch('/api/room');
@@ -109,25 +156,51 @@ async function refresh() {
 }
 
 function renderPlayers(list) {
-  $('count').textContent = String(list.length);
-  $('players').innerHTML = list.length
-    ? list.map(p => `
-        <div class="player">
-          <span class="dot" style="background:${p.color}"></span>
-          <span>${esc(p.name)}</span>
-        </div>`).join('')
-    : '<div class="empty">Пока никого</div>';
+  const el = $('players');
+  if (!el) return;
+  if (!list.length) {
+    el.innerHTML = '<div class="muted-text" style="padding:8px 0;font-size:12px;">Пока никого</div>';
+    return;
+  }
+  el.innerHTML = list.map(p => {
+    const initial = (p.name || '?').trim().charAt(0).toUpperCase();
+    return `
+      <div class="guest-player">
+        <span class="avatar" style="background:${p.color}">${esc(initial)}</span>
+        <span>${esc(p.name)}</span>
+      </div>
+    `;
+  }).join('');
 }
 
 function renderChat() {
-  $('chat').innerHTML = messages.map(m => `
+  const el = $('chat');
+  if (!el) return;
+  if (!messages.length) {
+    el.innerHTML = '<div class="muted-text">Сообщений пока нет</div>';
+    return;
+  }
+  el.innerHTML = messages.map(m => `
     <div class="msg">
-      <b style="color:${m.senderColor}">${esc(m.sender)}:</b> ${esc(m.text)}
+      <span class="who" style="color:${m.senderColor}">${esc(m.sender)}</span>
+      <span>${esc(m.text)}</span>
     </div>
   `).join('');
-  $('chat').scrollTop = $('chat').scrollHeight;
+  el.scrollTop = el.scrollHeight;
 }
 
 function esc(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
 }
+
+// ═══════════ СТАРТ ═══════════
+window.addEventListener('load', () => {
+  show('join-screen'); // страховка на случай, если что-то успело переключить
+  loadRoomPreview();
+  setInterval(() => {
+    if (me) return;
+    loadRoomPreview();
+  }, 3000);
+});

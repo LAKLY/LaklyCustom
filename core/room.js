@@ -2,7 +2,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { EVENTS } from '../shared/events.js';
 
-const COLORS = ['#FF006E', '#00F5FF', '#FFBE0B', '#8338EC', '#FB5607', '#2ED573', '#1E90FF', '#A55EEA'];
+const COLORS = ['#E5384F', '#F05068', '#FBBF24', '#4ADE80', '#9B8CFF', '#F97316', '#EC4899', '#14B8A6'];
 
 export class Room {
   constructor({ id, name, hostSocket, io, pluginLoader, pluginName = null }) {
@@ -37,7 +37,7 @@ export class Room {
     const list = [...this.players.values()].map(p => ({
       id: p.id, name: p.name, color: p.color, isHost: p.isHost,
     }));
-    list.unshift({ id: 'host', name: 'Хост', color: '#00F5FF', isHost: true });
+    list.unshift({ id: 'host', name: 'Хост', color: '#E5384F', isHost: true });
     return { players: list };
   }
 
@@ -108,14 +108,30 @@ export class Room {
     const plugin = this.pluginLoader.get(pluginName);
     if (!plugin) return false;
 
-    this.activePluginName = pluginName;
-    this.gameActive = true;
-    this.broadcast(EVENTS.GAME_STARTED, {
-      plugin: pluginName,
-      url: `/plugins/${pluginName}/game.html`,
-    });
-    await this.pluginLoader.emit(EVENTS.GAME_START, { room: this, plugin: pluginName });
-    return true;
+    // Mutex: пока идёт смена игры — игнорируем повторные вызовы.
+    if (this._switchingGame) return false;
+    this._switchingGame = true;
+
+    try {
+      // Если игра уже активна и это ДРУГОЙ плагин — сначала корректно
+      // останавливаем старую (шлём GAME_STOP, чтобы она убрала за собой).
+      if (this.gameActive && this.activePluginName && this.activePluginName !== pluginName) {
+        await this.stopGame();
+      }
+
+      this.activePluginName = pluginName;
+      this.gameActive = true;
+
+      this.broadcast(EVENTS.GAME_STARTED, {
+        plugin: pluginName,
+        url: `/plugins/${pluginName}/game.html`,
+      });
+
+      await this.pluginLoader.emit(EVENTS.GAME_START, { room: this, plugin: pluginName });
+      return true;
+    } finally {
+      this._switchingGame = false;
+    }
   }
 
   async stopGame() {

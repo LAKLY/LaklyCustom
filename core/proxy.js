@@ -120,36 +120,37 @@ export function createProxyServer() {
 
 function buildErrorHtml(code) {
   const hint =
-    code === 'ECONNREFUSED' ? 'Порт закрыт — приложение, скорее всего, не запущено или остановилось.'
-    : code === 'ECONNRESET' ? 'Соединение сброшено. Dev-сервер закрыл связь до ответа.'
+    code === 'ECONNREFUSED' ? 'Порт закрыт — приложение, скорее всего, не запущено.'
+    : code === 'ECONNRESET' ? 'Соединение сброшено. Dev-сервер закрыл связь.'
     : code === 'ETIMEDOUT'  ? 'Локальный сервер не ответил за отведённое время.'
-    : 'LaklyCustom не смог установить соединение с локальным портом.';
+    : 'LaklyCustom не смог подключиться к локальному порту.';
 
   return `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Локальный сервер не отвечает</title>
 <style>
   html,body{height:100%;margin:0}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-       background:#0A0E27;color:#E6EAF5;display:flex;align-items:center;
-       justify-content:center;padding:24px;text-align:center}
-  .card{max-width:560px;padding:32px;background:#0F1430;border:1px solid rgba(0,245,255,.14);border-radius:14px}
-  h1{color:#FF006E;font-size:26px;margin:0 0 14px;font-weight:500;letter-spacing:.3px}
-  p{color:#8A93B5;line-height:1.6;margin:10px 0;font-size:15px}
-  code{background:#141A3A;color:#00F5FF;padding:2px 7px;border-radius:4px;
-       font-family:ui-monospace,Consolas,monospace;font-size:13px}
-  button{margin-top:20px;padding:10px 22px;background:transparent;color:#00F5FF;
-         border:1px solid #00F5FF;border-radius:8px;font-size:14px;font-weight:500;
-         cursor:pointer;transition:background .15s,color .15s}
-  button:hover{background:#00F5FF;color:#0A0E27}
-  .code{margin-top:14px;font-size:12px;color:#8A93B5}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:#0D0C12;color:#F4F1F7;
+    display:flex;align-items:center;justify-content:center;
+    padding:24px;text-align:center;
+    background-image:radial-gradient(ellipse 700px 500px at 50% 0%,rgba(229,56,79,.12),transparent 60%);
+  }
+  .card{max-width:520px;padding:40px 32px;background:#1A1724;border:1px solid #2B2635;border-radius:20px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+  h1{color:#F05068;font-size:24px;margin:0 0 14px;font-weight:500;letter-spacing:-.2px}
+  p{color:#B0A8BE;line-height:1.65;margin:12px 0;font-size:15px}
+  code{background:#0D0C12;color:#63D8FF;padding:3px 8px;border-radius:5px;font-family:ui-monospace,Consolas,monospace;font-size:13px}
+  button{margin-top:22px;padding:12px 26px;background:#E5384F;color:#fff;border:1px solid #E5384F;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:all .15s;box-shadow:0 8px 28px rgba(229,56,79,.35)}
+  button:hover{background:#F05068;transform:translateY(-1px);box-shadow:0 12px 36px rgba(229,56,79,.5)}
+  .code{margin-top:16px;font-size:11.5px;color:#6F687D;font-family:ui-monospace,Consolas,monospace}
 </style></head><body>
 <div class="card">
   <h1>Локальный сервер не отвечает</h1>
   <p>${hint}</p>
   <p>Проверьте, что dev-сервер запущен и слушает <code>127.0.0.1</code>.</p>
-  <p>Если порт открыт, попробуйте запустить сервер с флагом <code>--host 0.0.0.0</code>.</p>
-  <button onclick="location.reload()">Обновить страницу</button>
+  <p>Если порт открыт, попробуйте запустить его с флагом <code>--host 0.0.0.0</code>.</p>
+  <button onclick="location.reload()">Обновить</button>
   <div class="code">Код: ${code}</div>
 </div></body></html>`;
 }
