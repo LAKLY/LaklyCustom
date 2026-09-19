@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>LaklyCustom</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/style.css?v=1.0.1">
+<link rel="stylesheet" href="/style.css?v=1.0.2">
 <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
@@ -18,7 +18,7 @@
     <h1 class="join-room-name" id="join-room-title">LaklyCustom</h1>
     <p class="join-sub">Введите имя — и вы в комнате</p>
 
-    <div class="join-form">
+    <div class="join-form" id="join-form">
       <input id="player-name" placeholder="Ваш ник" maxlength="20" autofocus autocomplete="off">
       <button id="btn-join" class="btn-join">Войти в комнату</button>
       <div id="join-error" class="error"></div>
@@ -39,7 +39,13 @@
         <img src="/assets/icon/icon-64.png" alt="" onerror="this.style.display='none'">
         <span>LaklyCustom</span>
       </div>
-      <span class="guest-self" id="player-self"></span>
+      <div class="guest-header-right">
+        <span class="guest-status" title="Комната активна">
+          <span class="guest-status-dot"></span>
+          <span>Онлайн</span>
+        </span>
+        <span class="guest-self" id="player-self"></span>
+      </div>
     </header>
 
     <div class="guest-players" id="players">
@@ -71,6 +77,6 @@
   </div>
 </div>
 
-<script src="/client.js?v=1.0.1"></script>
+<script src="/client.js?v=1.0.2"></script>
 </body>
 </html>

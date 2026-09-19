@@ -52,13 +52,26 @@
   const counter = $('counter');
   const lb = $('lb');
   const btn = $('btn');
-  let currentCount = 0;
+
   let player = null;
 
-  // Сообщаем родителю, что мы готовы
+  // ─── Optimistic-счёт ────────────────────────────────────
+  // Сервер шлёт GAME_STATE только после полного roundtrip'а через
+  // Cloudflare + worker_threads — это 200-350мс. Чтобы клик
+  // ощущался мгновенным, мы инкрементим цифру сразу локально,
+  // а серверное значение используем как источник правды и выравниваем.
+  //
+  //  - serverCount — последнее подтверждённое сервером число
+  //  - pending     — наши клики, ушедшие в сеть и ещё не отражённые
+  //
+  // Отображаем serverCount + pending. Никогда не откатываемся назад,
+  // потому что отставание сети не должно выглядеть как «минус клик».
+  let serverCount = 0;
+  let pending = 0;
+  let lastRendered = -1;
+
   window.parent.postMessage({ type: 'lakly:ready' }, '*');
 
-  // Слушаем данные от родителя
   window.addEventListener('message', (e) => {
     if (!e.data || typeof e.data !== 'object') return;
     const { type, data } = e.data;
@@ -72,19 +85,45 @@
     }
   });
 
-  // Клик — отправляем наверх
   btn.addEventListener('click', () => {
+    pending++;
+    renderCounter();
+
+    // Тактильный микро-фидбек: пульс идёт синхронно с цифрой.
+    counter.classList.add('pulse');
+    setTimeout(() => counter.classList.remove('pulse'), 80);
+
     window.parent.postMessage({ type: 'lakly:action', action: 'click' }, '*');
+  });
+
+  // Горячая клавиша Space — многие кликеры ждут именно её.
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.key === ' ') {
+      e.preventDefault();
+      btn.click();
+    }
   });
 
   function renderState(state) {
     if (!state) return;
-    if (typeof state.count === 'number' && state.count !== currentCount) {
-      counter.textContent = state.count;
-      counter.classList.add('pulse');
-      setTimeout(() => counter.classList.remove('pulse'), 80);
-      currentCount = state.count;
+
+    if (typeof state.count === 'number') {
+      const delta = state.count - serverCount;
+
+      // Сколько наших кликов реально подтверждено этим апдейтом.
+      // Может быть и 0 (апдейт от чужого клика), и больше 1
+      // (сервер «догнал» несколько наших кликов сразу).
+      if (delta > 0) {
+        pending = Math.max(0, pending - delta);
+      } else if (delta < 0) {
+        // Серверное состояние сброшено (например, Game Start). Доверяем ему.
+        pending = 0;
+      }
+
+      serverCount = state.count;
+      renderCounter();
     }
+
     if (Array.isArray(state.leaderboard)) {
       if (state.leaderboard.length === 0) {
         lb.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:6px 0;">Пока никто не кликал</div>';
@@ -97,6 +136,13 @@
         `).join('');
       }
     }
+  }
+
+  function renderCounter() {
+    const display = serverCount + pending;
+    if (display === lastRendered) return;
+    lastRendered = display;
+    counter.textContent = display;
   }
 
   function escapeHtml(s) {

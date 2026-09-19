@@ -7,10 +7,6 @@ let messages = [];
 let activeGame = null;
 let lastGameState = null;
 
-/**
- * Переключение экранов через атрибут hidden.
- * hidden=false — экран виден, hidden=true — скрыт.
- */
 function show(screenId) {
   ['join-screen', 'room-screen', 'closed-screen'].forEach(id => {
     const el = document.getElementById(id);
@@ -18,7 +14,6 @@ function show(screenId) {
   });
 }
 
-// Явно показываем join при загрузке, независимо от HTML
 show('join-screen');
 
 async function loadRoomPreview() {
@@ -37,10 +32,18 @@ function join() {
   const name = (input?.value || '').trim();
   if (!name) {
     $('join-error').textContent = 'Введите имя';
+    // Лёгкий shake формы — перезапускаем анимацию через reflow
+    const form = $('join-form');
+    if (form) {
+      form.classList.remove('shake');
+      void form.offsetWidth;
+      form.classList.add('shake');
+    }
     input?.focus();
     return;
   }
   $('join-error').textContent = '';
+  $('btn-join').disabled = true;
   socket.emit('player:join', { playerName: name, token: joinToken });
 }
 
@@ -64,8 +67,6 @@ function send() {
 // ═══════════ SOCKET ═══════════
 socket.on('connect', () => {
   console.log('[guest] socket connected');
-  // Убедимся, что при реконнекте мы всё ещё на join-screen,
-  // если ещё не зашли в комнату
   if (!me) show('join-screen');
 });
 
@@ -97,7 +98,7 @@ socket.on('player:kicked', () => {
 socket.on('error', (msg) => {
   console.log('[guest] server error:', msg);
   $('join-error').textContent = typeof msg === 'string' ? msg : 'Ошибка';
-  // Не переключаем экран — остаёмся на join, чтобы пользователь мог исправить
+  $('btn-join').disabled = false;
 });
 
 // ═══════════ GAME ═══════════
@@ -166,7 +167,7 @@ function renderPlayers(list) {
     const initial = (p.name || '?').trim().charAt(0).toUpperCase();
     return `
       <div class="guest-player">
-        <span class="avatar" style="background:${p.color}">${esc(initial)}</span>
+        <span class="avatar" style="background:${p.color};color:${p.color}">${esc(initial)}</span>
         <span>${esc(p.name)}</span>
       </div>
     `;
@@ -197,7 +198,7 @@ function esc(s) {
 
 // ═══════════ СТАРТ ═══════════
 window.addEventListener('load', () => {
-  show('join-screen'); // страховка на случай, если что-то успело переключить
+  show('join-screen');
   loadRoomPreview();
   setInterval(() => {
     if (me) return;

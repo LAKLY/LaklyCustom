@@ -24,6 +24,7 @@
   --r-lg: 16px;
   --r-xl: 20px;
   --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-back: cubic-bezier(0.34, 1.56, 0.64, 1);
   --t-fast: 120ms;
   --t: 200ms;
@@ -55,9 +56,13 @@ body {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  animation: screen-in 280ms var(--ease-out) both;
 }
-.screen[hidden] {
-  display: none !important;
+.screen[hidden] { display: none !important; }
+
+@keyframes screen-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ═══════════ JOIN SCREEN ═══════════ */
@@ -68,6 +73,7 @@ body {
 }
 
 .join-card {
+  position: relative;
   width: 100%;
   max-width: 400px;
   text-align: center;
@@ -82,17 +88,36 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* Мягкое «дыхание» позади карточки */
+.join-card::before {
+  content: '';
+  position: absolute;
+  inset: -80px -40px;
+  background: radial-gradient(circle at center, var(--brand-glow), transparent 65%);
+  opacity: .3;
+  pointer-events: none;
+  z-index: -1;
+  animation: ambient 5s ease-in-out infinite;
+  filter: blur(20px);
+}
+@keyframes ambient {
+  0%, 100% { opacity: .22; transform: scale(1); }
+  50%      { opacity: .38; transform: scale(1.06); }
+}
+
 .join-nika {
   width: 180px;
   height: 180px;
   image-rendering: pixelated;
   margin-bottom: 16px;
   filter: drop-shadow(0 16px 50px var(--brand-glow));
-  animation: float 3s ease-in-out infinite;
+  animation: float 3.6s ease-in-out infinite;
 }
 @keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-10px); }
+  0%   { transform: translateY(0)    rotate(-0.4deg); }
+  33%  { transform: translateY(-6px) rotate(0.1deg);  }
+  66%  { transform: translateY(-3px) rotate(0.4deg);  }
+  100% { transform: translateY(0)    rotate(-0.4deg); }
 }
 
 .join-room-name {
@@ -129,6 +154,10 @@ body {
   outline: none;
   transition: all var(--t-fast) var(--ease);
 }
+.join-form input:hover:not(:focus) {
+  border-color: var(--border-2);
+  background: var(--surface);
+}
 .join-form input:focus {
   border-color: var(--brand);
   box-shadow: 0 0 0 4px var(--brand-soft), 0 0 40px var(--brand-glow);
@@ -150,6 +179,13 @@ body {
   box-shadow: 0 8px 28px rgba(229,56,79,.35), inset 0 1px 0 rgba(255,255,255,.15);
   position: relative;
   overflow: hidden;
+  /* Однократный glow-pulse при появлении — не пульсирует постоянно */
+  animation: join-glow 1.9s ease-out 500ms 1;
+}
+@keyframes join-glow {
+  0%   { box-shadow: 0 8px 28px rgba(229,56,79,.35), 0 0 0 0 rgba(229,56,79,0),    inset 0 1px 0 rgba(255,255,255,.15); }
+  40%  { box-shadow: 0 12px 36px rgba(229,56,79,.5), 0 0 0 14px rgba(229,56,79,0),  inset 0 1px 0 rgba(255,255,255,.2); }
+  100% { box-shadow: 0 8px 28px rgba(229,56,79,.35), 0 0 0 0 rgba(229,56,79,0),     inset 0 1px 0 rgba(255,255,255,.15); }
 }
 .btn-join::before {
   content: '';
@@ -165,7 +201,9 @@ body {
   transform: translateY(-2px);
   box-shadow: 0 12px 36px rgba(229,56,79,.5), inset 0 1px 0 rgba(255,255,255,.2);
 }
-.btn-join:active:not(:disabled) { transform: translateY(0); }
+.btn-join:active:not(:disabled) {
+  transform: translateY(0) scale(.99);
+}
 .btn-join:disabled { opacity: .5; cursor: not-allowed; }
 
 .error {
@@ -174,6 +212,16 @@ body {
   min-height: 18px;
   font-weight: 500;
 }
+
+/* Shake при ошибке «Введите имя» */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-4px); }
+  40%      { transform: translateX(4px); }
+  60%      { transform: translateX(-3px); }
+  80%      { transform: translateX(3px); }
+}
+.join-form.shake { animation: shake 280ms var(--ease); }
 
 .join-footer {
   margin-top: 28px;
@@ -209,6 +257,19 @@ body {
   overflow: hidden;
 }
 
+/* Stagger появления секций при входе в комнату */
+.guest-app > * {
+  animation: section-in 420ms var(--ease-out) backwards;
+}
+.guest-app > *:nth-child(1) { animation-delay:   0ms; }
+.guest-app > *:nth-child(2) { animation-delay:  60ms; }
+.guest-app > *:nth-child(3) { animation-delay: 120ms; }
+.guest-app > *:nth-child(4) { animation-delay: 180ms; }
+@keyframes section-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 .guest-header {
   display: flex;
   align-items: center;
@@ -230,6 +291,36 @@ body {
   width: 24px;
   height: 24px;
   image-rendering: pixelated;
+}
+.guest-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.guest-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 20px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  letter-spacing: .1px;
+}
+.guest-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+  animation: pulse-dot 2.4s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .45; }
 }
 .guest-self {
   padding: 5px 14px;
@@ -256,12 +347,21 @@ body {
   border-radius: 20px;
   font-size: 13px;
   font-weight: 500;
-  animation: pop-in var(--t) var(--ease-back);
+  animation: pop-in 320ms var(--ease-back);
 }
+.guest-players .guest-player:nth-child(1) { animation-delay:   0ms; }
+.guest-players .guest-player:nth-child(2) { animation-delay:  40ms; }
+.guest-players .guest-player:nth-child(3) { animation-delay:  80ms; }
+.guest-players .guest-player:nth-child(4) { animation-delay: 120ms; }
+.guest-players .guest-player:nth-child(5) { animation-delay: 160ms; }
+.guest-players .guest-player:nth-child(n+6) { animation-delay: 200ms; }
+
 @keyframes pop-in {
-  from { opacity: 0; transform: scale(.9); }
-  to   { opacity: 1; transform: scale(1); }
+  0%   { opacity: 0; transform: scale(.85); }
+  60%  { opacity: 1; transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); }
 }
+
 .guest-player .avatar {
   width: 24px;
   height: 24px;
@@ -272,6 +372,8 @@ body {
   color: #fff;
   font-size: 11px;
   font-weight: 600;
+  /* Мягкое свечение цвета игрока */
+  box-shadow: 0 0 10px -2px currentColor;
 }
 
 .guest-game {
@@ -280,16 +382,36 @@ body {
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--bg-2);
-  box-shadow: var(--shadow);
+  box-shadow: 0 4px 16px rgba(0,0,0,.35);
   min-height: 300px;
   max-height: 60vh;
   aspect-ratio: 16/9;
+  position: relative;
+  animation: game-in 400ms var(--ease-out);
+}
+@keyframes game-in {
+  from { opacity: 0; transform: scale(.985); }
+  to   { opacity: 1; transform: scale(1); }
 }
 .guest-game iframe {
   width: 100%;
   height: 100%;
   border: 0;
   display: block;
+}
+/* Лёгкий loading-shimmer под iframe, пока плагин не отрисовался */
+.guest-game::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 30%, rgba(255,255,255,.03) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: game-shimmer 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes game-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -100% 0; }
 }
 
 .guest-chat {
@@ -316,10 +438,10 @@ body {
   font-size: 14px;
   line-height: 1.5;
   word-wrap: break-word;
-  animation: msg-in var(--t-fast) var(--ease);
+  animation: msg-in 240ms var(--ease-out);
 }
 @keyframes msg-in {
-  from { opacity: 0; transform: translateY(3px); }
+  from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 .chat-list .msg .who {
@@ -344,25 +466,36 @@ body {
   outline: none;
   transition: all var(--t-fast) var(--ease);
 }
+.chat-input-row input:hover:not(:focus) {
+  border-color: var(--border-2);
+}
 .chat-input-row input:focus {
   border-color: var(--brand);
   box-shadow: 0 0 0 3px var(--brand-soft);
 }
 .chat-input-row button {
-  padding: 0 22px;
+  width: 46px;
+  min-width: 46px;
+  padding: 0;
   background: var(--brand);
   color: #fff;
   border: 1px solid var(--brand);
-  border-radius: var(--r);
-  font-size: 16px;
+  border-radius: 50%;
+  font-size: 17px;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--t-fast) var(--ease);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .chat-input-row button:hover {
   background: var(--brand-hover);
-  transform: translateY(-1px);
+  transform: translateY(-1px) scale(1.04);
   box-shadow: 0 6px 20px var(--brand-glow);
+}
+.chat-input-row button:active {
+  transform: translateY(0) scale(.94);
 }
 
 .muted-text {
@@ -395,17 +528,29 @@ body {
   height: 140px;
   image-rendering: pixelated;
   margin-bottom: 16px;
-  opacity: .85;
+  opacity: .9;
   filter: drop-shadow(0 10px 30px rgba(0,0,0,.5));
+  /* Лёгкое «дыхание» спящей Ники */
+  animation: sleep-sway 3.6s ease-in-out infinite;
+}
+@keyframes sleep-sway {
+  0%, 100% { transform: translateY(0)    rotate(-1deg); }
+  50%      { transform: translateY(-6px) rotate(1deg);  }
 }
 .closed-card h1 {
   font-size: 26px;
   font-weight: 400;
   color: var(--text);
+  animation: fade-up 400ms var(--ease-out) 200ms backwards;
 }
 .closed-card p {
   color: var(--text-2);
   font-size: 14px;
+  animation: fade-up 400ms var(--ease-out) 320ms backwards;
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ═══════════ SCROLLBAR ═══════════ */
@@ -430,4 +575,19 @@ body {
   .guest-game { max-height: 45vh; }
   .join-nika { width: 140px; height: 140px; }
   .join-room-name { font-size: 24px; }
+  .chat-input-row button { width: 42px; min-width: 42px; }
+  .guest-status span:last-child { display: none; }
+  .guest-status { padding: 5px 8px; }
+}
+
+/* ═══════════ REDUCED MOTION ═══════════ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
