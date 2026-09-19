@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>LaklyCustom</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/style.css?v=1.0.2">
+<link rel="stylesheet" href="/style.css?v=1.0.3">
 <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
@@ -19,9 +19,14 @@
     <p class="join-sub">Введите имя — и вы в комнате</p>
 
     <div class="join-form" id="join-form">
-      <input id="player-name" placeholder="Ваш ник" maxlength="20" autofocus autocomplete="off">
-      <button id="btn-join" class="btn-join">Войти в комнату</button>
-      <div id="join-error" class="error"></div>
+      <label class="sr-only" for="player-name">Ваш ник</label>
+      <input id="player-name" placeholder="Ваш ник" maxlength="20" autofocus
+             autocomplete="off" spellcheck="false">
+      <button id="btn-join" class="btn-join" type="button">
+        <span class="btn-join-spinner" aria-hidden="true"></span>
+        <span class="btn-join-text" id="btn-join-text">Войти в комнату</span>
+      </button>
+      <div id="join-error" class="error" role="alert" aria-live="polite"></div>
     </div>
 
     <div class="join-footer">
@@ -40,29 +45,35 @@
         <span>LaklyCustom</span>
       </div>
       <div class="guest-header-right">
-        <span class="guest-status" title="Комната активна">
-          <span class="guest-status-dot"></span>
-          <span>Онлайн</span>
+        <span class="guest-status" id="guest-status" data-status="connecting"
+              role="status" aria-live="polite">
+          <span class="guest-status-dot" aria-hidden="true"></span>
+          <span class="guest-status-text" id="guest-status-text">Подключение…</span>
         </span>
         <span class="guest-self" id="player-self"></span>
       </div>
     </header>
 
-    <div class="guest-players" id="players">
+    <div class="guest-players" id="players" aria-live="polite">
       <div class="muted-text" style="padding:8px 0;font-size:12px;">Пока никого</div>
     </div>
 
     <div class="guest-game" id="game-block" hidden>
+      <div class="guest-game-loading" id="game-loading">
+        <div class="guest-game-spinner" aria-hidden="true"></div>
+        <div class="guest-game-loading-text">Загрузка игры…</div>
+      </div>
       <iframe id="game-frame" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
     </div>
 
     <div class="guest-chat">
-      <div id="chat" class="chat-list">
+      <div id="chat" class="chat-list" aria-live="polite" aria-relevant="additions">
         <div class="muted-text">Сообщений пока нет</div>
       </div>
       <div class="chat-input-row">
-        <input id="chat-input" placeholder="Написать сообщение…" maxlength="200">
-        <button id="btn-send">→</button>
+        <input id="chat-input" placeholder="Написать сообщение…" maxlength="200"
+               autocomplete="off" aria-label="Сообщение">
+        <button id="btn-send" type="button" aria-label="Отправить сообщение">→</button>
       </div>
     </div>
   </div>
@@ -77,6 +88,6 @@
   </div>
 </div>
 
-<script src="/client.js?v=1.0.2"></script>
+<script src="/client.js?v=1.0.3"></script>
 </body>
 </html>

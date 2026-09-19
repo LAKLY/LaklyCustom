@@ -591,3 +591,123 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* ═══════════ JOIN BUTTON: состояния ═══════════ */
+.btn-join {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.btn-join-spinner {
+  display: none;
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgba(255,255,255,.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: btn-spin 700ms linear infinite;
+}
+.btn-join.connecting .btn-join-spinner { display: inline-block; }
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
+/* ═══════════ GUEST STATUS: три состояния ═══════════ */
+.guest-status { transition: color 160ms var(--ease); }
+.guest-status-dot {
+  transition: background 200ms var(--ease), box-shadow 200ms var(--ease);
+  animation: none;
+}
+
+.guest-status[data-status="online"] .guest-status-dot {
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+  animation: pulse-dot 2.4s ease-in-out infinite;
+}
+.guest-status[data-status="online"] .guest-status-text {
+  color: var(--text-2);
+}
+
+.guest-status[data-status="connecting"] .guest-status-dot {
+  background: #FBBF24;
+  box-shadow: 0 0 8px #FBBF24;
+  animation: pulse-dot 900ms ease-in-out infinite;
+}
+.guest-status[data-status="connecting"] .guest-status-text {
+  color: #FBBF24;
+}
+
+.guest-status[data-status="offline"] .guest-status-dot {
+  background: var(--danger);
+  box-shadow: 0 0 8px var(--danger);
+  animation: none;
+}
+.guest-status[data-status="offline"] .guest-status-text {
+  color: var(--danger);
+}
+
+/* ═══════════ GUEST PLAYER: leaving animation ═══════════ */
+.guest-player.leaving {
+  animation: player-leave 320ms var(--ease) forwards;
+  pointer-events: none;
+}
+@keyframes player-leave {
+  0%   { opacity: 1; transform: scale(1);   }
+  100% { opacity: 0; transform: scale(.85); }
+}
+
+/* ═══════════ GAME LOADING OVERLAY ═══════════ */
+.guest-game-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background:
+    radial-gradient(circle at center, rgba(229,56,79,.08), transparent 70%),
+    var(--bg-2);
+  z-index: 2;
+  transition: opacity 240ms var(--ease);
+}
+.guest-game-loading[hidden] {
+  display: flex !important; /* перебиваем глобальный [hidden] для плавности */
+  opacity: 0;
+  pointer-events: none;
+}
+.guest-game-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2.5px solid rgba(229,56,79,.25);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: game-spin 800ms linear infinite;
+  box-shadow: 0 0 20px var(--brand-glow);
+}
+@keyframes game-spin { to { transform: rotate(360deg); } }
+.guest-game-loading-text {
+  font-size: 13px;
+  color: var(--text-2);
+  letter-spacing: .2px;
+}
+
+/* Shimmer крутится только пока iframe грузится */
+.guest-game:not(.loading)::after { display: none; }
+
+/* ═══════════ CHAT: своя реплика ═══════════ */
+.chat-list .msg.mine {
+  padding: 6px 10px;
+  margin-left: -10px;
+  margin-right: -10px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, transparent, rgba(229,56,79,.06));
+}
+
+/* ═══════════ SR-ONLY ═══════════ */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0);
+  white-space: nowrap; border: 0;
+}
