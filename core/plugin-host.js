@@ -31,7 +31,6 @@ export class PluginHost {
 
   async start(entryUrl, config = null) {
     this.worker = new Worker(WORKER_PATH, { resourceLimits: WORKER_RESOURCE_LIMITS });
-    this.worker.unref();
 
     this.worker.on('message', (msg) => this._onMessage(msg));
     this.worker.on('error', (err) => {
@@ -50,14 +49,11 @@ export class PluginHost {
 
     const loaded = await new Promise((resolve) => {
       this._loadResolve = resolve;
-      // ─── ПЕРЕДАЁМ CONFIG ──────────────────────────────────
       this.worker.postMessage({ type: 'load', entryUrl, config });
     });
 
     if (!loaded.ok) throw new Error(loaded.error || 'plugin load failed');
     this.loaded = true;
-
-    try { this.worker.unref(); } catch {}
 
     return {
       name: loaded.name,
@@ -80,9 +76,21 @@ export class PluginHost {
 
     try { w.postMessage({ type: 'shutdown' }); } catch {}
 
-    setTimeout(() => {
-      try { w.terminate(); } catch {}
-    }, 500).unref();
+    // Явно ждём выхода worker'а, с предохранителем на 500 мс.
+    await new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        try { w.terminate(); } catch {}
+        finish();
+      }, 500);
+      w.once('exit', finish);
+    });
 
     this.worker = null;
     this.loaded = false;
