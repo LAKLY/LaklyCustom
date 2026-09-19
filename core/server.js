@@ -8,7 +8,7 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { RoomManager } from './room-manager.js';
 import { PluginLoader } from './plugin-loader.js';
-import { openTunnel, closeTunnel } from './tunnels/index.js';
+import { TunnelSupervisor } from './tunnel-supervisor.js';
 import { EVENTS } from '../shared/events.js';
 import {
   validatePlayerName, validateChatMessage, validateRoomName,
@@ -41,14 +41,6 @@ function buildCorsOrigin() {
   };
 }
 
-/**
- * Считаем запрос локальным, если он пришёл напрямую от того же ПК
- * (Electron-хост-UI или браузер на localhost), а НЕ через туннель.
- *
- * Признаки внешнего запроса:
- *  - CF-Connecting-IP — заголовок, который добавляет cloudflared
- *  - X-Forwarded-For — добавляет ngrok и любой другой upstream-прокси
- */
 function isLocalRequest(req) {
   if (req.headers['cf-connecting-ip']) return false;
   const xff = req.headers['x-forwarded-for'];
@@ -78,8 +70,7 @@ export async function startServer({
   await pluginLoader.load();
 
   const limiter = new RateLimiter();
-  let tunnelInstance = null;
-  let publicUrl = null;
+  let tunnelSupervisor = null;
 
   const pruneTimer = setInterval(() => limiter.prune(), 5 * 60 * 1000);
   pruneTimer.unref?.();
@@ -175,12 +166,11 @@ export async function startServer({
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // ─── Proxy probe (только с локального адреса) ──────────────
+  // ─── Proxy probe ───────────────────────────────────────────
   app.post('/api/proxy/check', async (req, res) => {
     if (!isLocalRequest(req)) {
       return res.status(403).json({ ok: false, error: 'forbidden' });
     }
-
     const ip = req.ip || 'unknown';
     if (!limiter.check(`proxy-check:${ip}`, PROXY_CHECK_RATE)) {
       return res.status(429).json({ ok: false, error: 'Слишком часто' });
@@ -202,7 +192,6 @@ export async function startServer({
     if (!isLocalRequest(req)) {
       return res.status(403).json({ error: 'forbidden' });
     }
-
     const ip = req.ip || 'unknown';
     if (!limiter.check(`proxy-scan:${ip}`, PROXY_CHECK_RATE)) {
       return res.status(429).json({ error: 'Слишком часто' });
@@ -265,7 +254,7 @@ export async function startServer({
     });
   });
 
-  // ─── Default статика (лобби) ───────────────────────────────
+  // ─── Default статика ───────────────────────────────────────
   app.use(express.static(path.join(ROOT, 'public'), noCache));
 
   // ─── Socket.IO ──────────────────────────────────────────────
@@ -318,22 +307,50 @@ export async function startServer({
         }
       }
 
+      // Поднимаем супервизор один раз за жизнь процесса.
+      if (!tunnelSupervisor) {
+        tunnelSupervisor = new TunnelSupervisor({
+          port: httpServer.address().port,
+          onUrlChange: ({ newUrl, provider }) => {
+            const activeRoom = roomManager.findActive();
+            if (!activeRoom) return;
+            activeRoom.publicUrl = `${newUrl}?t=${activeRoom.joinToken}`;
+
+            // Хосту — новый URL + провайдер
+            io.to(activeRoom.hostSocketId).emit('host:room-url-changed', {
+              publicUrl: activeRoom.publicUrl,
+              provider,
+            });
+            // Гостям — мягкое уведомление
+            activeRoom.broadcast('room:url-changed', { provider });
+            activeRoom.addMessage('Система', '#63D8FF', 'Ссылка комнаты обновлена');
+          },
+          onStateChange: (state) => {
+            const activeRoom = roomManager.findActive();
+            if (!activeRoom) return;
+            io.to(activeRoom.hostSocketId).emit('host:tunnel-state', state);
+          },
+        });
+        await tunnelSupervisor.start();
+      }
+
+      // Если супервизор сейчас пересоздаёт туннель — подождём немного.
+      let tunnelUrl = tunnelSupervisor.url;
+      if (!tunnelUrl) tunnelUrl = await tunnelSupervisor.waitForReady(15_000);
+
       const room = await roomManager.createRoom({
         name, hostSocket: socket, pluginName,
         type: requestedType, staticDir, proxyPort, options,
       });
 
-      if (!publicUrl) {
-        const t = await openTunnel(httpServer.address().port);
-        tunnelInstance = t.instance;
-        publicUrl = t.url;
-      }
-      room.publicUrl = `${publicUrl}?t=${room.joinToken}`;
+      // Всегда используем актуальный URL супервизора.
+      const currentUrl = tunnelSupervisor.url || `http://localhost:${httpServer.address().port}`;
+      room.publicUrl = `${currentUrl}?t=${room.joinToken}`;
 
       socket.emit('host:room-created', {
         roomId: room.id, roomName: room.name,
         publicUrl: room.publicUrl,
-        provider: tunnelInstance?.name || 'local',
+        provider: tunnelSupervisor.provider || 'local',
         activePlugin: room.activePluginName,
         type: room.type, proxyPort: room.proxyPort,
         staticDir: room.staticDir,
@@ -348,6 +365,14 @@ export async function startServer({
       if (!room || room.hostSocketId !== socket.id) return;
       await roomManager.destroyRoom(room.id);
       hooks.onRoomClosed?.();
+    });
+
+    // Ручной форс-рестарт туннеля (из трея или из UI).
+    socket.on('host:restart-tunnel', async () => {
+      const room = roomManager.getRoomBySocket(socket.id);
+      if (!room || room.hostSocketId !== socket.id) return;
+      if (!tunnelSupervisor) return;
+      await tunnelSupervisor.forceRestart();
     });
 
     socket.on('host:kick-player', async (payload = {}) => {
@@ -447,7 +472,7 @@ export async function startServer({
     plugins: pluginLoader,
     close: async () => {
       clearInterval(pruneTimer);
-      if (tunnelInstance) await closeTunnel(tunnelInstance);
+      await tunnelSupervisor?.stop?.();
       for (const room of roomManager.rooms.values()) await room.close('shutdown');
       await pluginLoader.unloadAll();
       await new Promise(res => httpServer.close(() => res()));

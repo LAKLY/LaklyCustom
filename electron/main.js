@@ -71,7 +71,7 @@ ipcMain.handle('settings:set', async (_e, data) => {
 ipcMain.handle('plugin:install-zip', async (_e, zipPath) => {
   if (!srv) return { ok: false, error: 'Сервер не запущен' };
   try {
-    const name = await srv.plugins.installFromZip(zipPath, app);
+    const name = await srv.plugins.installFromZip(zipPath);
     return { ok: true, plugin: name };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -114,14 +114,25 @@ function loadIcon(relativePath) {
   return nativeImage.createEmpty();
 }
 
+// Кэш tray-иконок: три состояния → nativeImage.
+// Загружаются один раз, дальше переиспользуются.
+const TRAY_ICON_FILES = {
+  idle:   'tray/tray-idle.png',
+  active: 'tray/tray-active.png',
+  busy:   'tray/tray-busy.png',
+};
+const trayIconCache = new Map();
+
 function loadTrayIcon(state = 'idle') {
-  const map = {
-    idle:   'tray/tray-idle.png',
-    active: 'tray/tray-active.png',
-    busy:   'tray/tray-busy.png',
-  };
-  const icon = loadIcon(map[state] || map.idle);
-  if (icon.isEmpty()) return loadIcon('icon/icon-64.png');
+  if (trayIconCache.has(state)) return trayIconCache.get(state);
+
+  const file = TRAY_ICON_FILES[state] || TRAY_ICON_FILES.idle;
+  let icon = loadIcon(file);
+  if (icon.isEmpty()) {
+    // Fallback: если конкретной tray-иконки нет — берём общую.
+    icon = loadIcon('icon/icon-64.png');
+  }
+  trayIconCache.set(state, icon);
   return icon;
 }
 
@@ -130,18 +141,37 @@ function loadWindowIcon() {
 }
 
 // ─── Трей ─────────────────────────────────────────────────────
+// Мемоизация: не дёргаем setImage/setToolTip без реальной смены состояния.
+const trayMemo = { image: null, tooltip: null };
+
+// Правило: idle → комнаты нет, active → комната есть, но пусто,
+//         busy → в комнате есть хотя бы один гость.
+function computeTrayState() {
+  if (!roomActive) return 'idle';
+  return playerCount > 0 ? 'busy' : 'active';
+}
+
 function refreshTray() {
   if (!tray) return;
 
-  const trayState = !roomActive ? 'idle' : playerCount > 0 ? 'busy' : 'active';
-  const icon = loadTrayIcon(trayState);
-  if (!icon.isEmpty()) tray.setImage(icon);
+  // Иконка
+  const state = computeTrayState();
+  if (state !== trayMemo.image) {
+    const icon = loadTrayIcon(state);
+    if (!icon.isEmpty()) tray.setImage(icon);
+    trayMemo.image = state;
+  }
 
-  const status = roomActive
-    ? `Комната активна · игроков: ${playerCount}`
-    : 'Комната не запущена';
-  tray.setToolTip(`LaklyCustom\n${status}`);
+  // Tooltip
+  const tooltip = roomActive
+    ? `LaklyCustom\nКомната активна · игроков: ${playerCount}`
+    : 'LaklyCustom\nКомната не запущена';
+  if (tooltip !== trayMemo.tooltip) {
+    tray.setToolTip(tooltip);
+    trayMemo.tooltip = tooltip;
+  }
 
+  // Меню — пересобираем всегда, оно зависит от roomActive.
   const items = [
     { label: 'Открыть окно', click: () => win?.show() },
     { type: 'separator' },
@@ -175,7 +205,14 @@ function refreshTray() {
 }
 
 function createTray() {
+  // Прогреваем кэш всех трёх состояний, чтобы первое переключение
+  // не мигало и не подгружало файл с диска в момент события.
+  loadTrayIcon('idle');
+  loadTrayIcon('active');
+  loadTrayIcon('busy');
+
   tray = new Tray(loadTrayIcon('idle'));
+  trayMemo.image = 'idle';
   refreshTray();
   tray.on('click', () => win?.isVisible() ? win.hide() : win?.show());
 }
@@ -207,7 +244,6 @@ const serverHooks = {
 
 // ─── Bootstrap ────────────────────────────────────────────────
 async function bootstrap() {
-  // Убираем верхнее меню (Alt больше ничего не показывает)
   Menu.setApplicationMenu(null);
 
   const settings = await readSettings();
@@ -241,7 +277,6 @@ async function bootstrap() {
     },
   });
 
-  // Дублируем — гарантирует, что меню не появится по Alt
   win.setMenuBarVisibility(false);
 
   await win.loadURL(`http://localhost:${srv.port}/host/`);
@@ -264,13 +299,11 @@ async function bootstrap() {
   createTray();
 
   // ─── Глобальные горячие клавиши ─────────────────────────────
-  // Ctrl+Alt+L — показать/скрыть окно
   globalShortcut.register('CommandOrControl+Alt+L', () => {
     if (!win) return;
     win.isVisible() ? win.hide() : win.show();
   });
 
-  // Ctrl+Alt+C — создать комнату (через рендерер)
   globalShortcut.register('CommandOrControl+Alt+C', () => {
     win?.show();
     win?.webContents.send('tray:action', 'create-room');

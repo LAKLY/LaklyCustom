@@ -2,9 +2,9 @@
 export const EVENTS = {
   // Room lifecycle (core → plugins)
   ROOM_CREATED: 'core:room-created',
-  ROOM_CLOSING: 'core:room-closing',      // до очистки — можно ещё рассылать
-  ROOM_CLOSED: 'core:room-closed',        // после очистки игроков
-  ROOM_DESTROYED: 'core:room-destroyed',  // финальный сигнал для plugin state cleanup
+  ROOM_CLOSING: 'core:room-closing',
+  ROOM_CLOSED: 'core:room-closed',
+  ROOM_DESTROYED: 'core:room-destroyed',
 
   // Player lifecycle
   PLAYER_JOINED: 'core:player-joined',
@@ -28,4 +28,8 @@ export const EVENTS = {
   GAME_STARTED: 'game:started',
   GAME_STOPPED: 'game:stopped',
   GAME_STATE: 'game:state',
+
+  // Tunnel / public URL lifecycle (host UI)
+  ROOM_URL_CHANGED: 'host:room-url-changed',
+  TUNNEL_STATE: 'host:tunnel-state',
 };

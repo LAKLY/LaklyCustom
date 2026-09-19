@@ -2,9 +2,6 @@
 import { startTunnel } from 'untun';
 
 // Cloudflare edge видит туннель обычно за 3–5 секунд.
-// Фиксированная пауза надёжнее, чем fetch-чек из той же машины:
-// локальный round-trip часто блокируется NAT-loopback / firewall,
-// из-за чего рабочий туннель ошибочно считается «не готов».
 const SETTLE_MS = 5000;
 
 export class CloudflareQuickProvider {
@@ -16,10 +13,20 @@ export class CloudflareQuickProvider {
   }
 
   async start(port) {
+    // Форсируем HTTP/2 как протокол до EDGE Cloudflare.
+    //
+    // Читается самим cloudflared при старте. НЕ путать с опцией
+    // `protocol` в startTunnel() — та меняет схему для origin
+    // (http2://localhost:3000), а Express умеет только HTTP/1.1,
+    // поэтому cloudflared падал и туннель умирал через 5 секунд.
+    const prev = process.env.TUNNEL_TRANSPORT_PROTOCOL;
+    process.env.TUNNEL_TRANSPORT_PROTOCOL = 'http2';
+
     try {
       this.#tunnel = await startTunnel({
         port,
         acceptCloudflareNotice: true,
+        // никаких `protocol:` тут быть не должно
       });
 
       const url = await this.#tunnel.getURL();
@@ -30,6 +37,11 @@ export class CloudflareQuickProvider {
     } catch (err) {
       await this.stop();
       throw err;
+    } finally {
+      // Возвращаем env в исходное состояние, чтобы не влиять
+      // на другие провайдеры (ngrok и т.п.) в том же процессе.
+      if (prev === undefined) delete process.env.TUNNEL_TRANSPORT_PROTOCOL;
+      else process.env.TUNNEL_TRANSPORT_PROTOCOL = prev;
     }
   }
 

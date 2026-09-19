@@ -46,6 +46,7 @@ const roomActive    = $('room-active');
 const welcomeScreen = $('welcome-screen');
 const loadingOverlay = $('loading-overlay');
 const loadingText   = $('loading-text');
+const loadingTip    = $('loading-tip');
 const errorModal    = $('error-modal');
 const errorTitle    = $('error-title');
 const errorMessage  = $('error-message');
@@ -93,6 +94,18 @@ let editingPluginId = null;
 let currentMode = 'default';
 let currentRoomInfo = null;
 
+// ═══════════ LOADING TIPS ═══════════
+const LOADING_TIPS = [
+  'Устанавливаем соединение…',
+  'Регистрируем комнату…',
+  'Готовим публичную ссылку…',
+  'Генерируем QR-код…',
+  'Обычно это занимает 5–10 секунд',
+];
+const LOADING_TIP_INTERVAL_MS = 1800;
+let loadingTipTimer = null;
+let loadingTipIndex = 0;
+
 // ═══════════ NIKA ═══════════
 const NIKA_IMAGES = {
   welcome: 'nika-welcome.png',
@@ -127,9 +140,41 @@ errorClose.onclick = () => { errorModal.hidden = true; };
 
 function showLoading(text) {
   loadingText.textContent = text || 'Открываем комнату…';
+
+  // Сбрасываем tips
+  clearInterval(loadingTipTimer);
+  loadingTipTimer = null;
+  loadingTipIndex = 0;
+  if (loadingTip) {
+    loadingTip.textContent = '';
+    loadingTip.classList.remove('show');
+  }
+
+  // Запускаем ротацию подсказок — первая появится через LOADING_TIP_INTERVAL_MS
+  if (loadingTip) {
+    loadingTipTimer = setInterval(() => {
+      if (loadingTipIndex >= LOADING_TIPS.length) {
+        clearInterval(loadingTipTimer);
+        loadingTipTimer = null;
+        return;
+      }
+      loadingTip.textContent = LOADING_TIPS[loadingTipIndex++];
+      loadingTip.classList.add('show');
+    }, LOADING_TIP_INTERVAL_MS);
+  }
+
   loadingOverlay.hidden = false;
 }
-function hideLoading() { loadingOverlay.hidden = true; }
+function hideLoading() {
+  loadingOverlay.hidden = true;
+  clearInterval(loadingTipTimer);
+  loadingTipTimer = null;
+  loadingTipIndex = 0;
+  if (loadingTip) {
+    loadingTip.textContent = '';
+    loadingTip.classList.remove('show');
+  }
+}
 
 // ═══════════ WELCOME ═══════════
 async function checkFirstRun() {
@@ -377,6 +422,54 @@ socket.on('host:room-created', async (data) => {
   renderPluginsGrid();
 });
 
+// Туннель пересоздался — обновляем ссылку и QR.
+socket.on('host:room-url-changed', async ({ publicUrl, provider }) => {
+  if (!roomActiveFlag) return;
+  if (typeof publicUrl === 'string' && publicUrl !== roomUrl.value) {
+    roomUrl.value = publicUrl;
+  }
+  try {
+    const r = await fetch('/api/qr');
+    const j = await r.json();
+    if (j.qr) qrEl.innerHTML = `<img src="${j.qr}" alt="QR">`;
+  } catch {}
+
+  const isPublic = provider && provider !== 'local';
+  statusText.textContent = isPublic ? 'Комната активна' : 'Только локально';
+  if (isPublic) statusDot.classList.add('on');
+  toast('Ссылка комнаты обновлена');
+});
+
+// Статус туннеля для индикации в сайдбаре.
+socket.on('host:tunnel-state', ({ state }) => {
+  if (!roomActiveFlag) return;
+  switch (state) {
+    case 'offline':
+      statusDot.classList.remove('on');
+      statusText.textContent = 'Нет интернета';
+      break;
+    case 'local-down':
+      statusDot.classList.remove('on');
+      statusText.textContent = 'Локальный сервер недоступен';
+      break;
+    case 'unhealthy':
+      statusDot.classList.remove('on');
+      statusText.textContent = 'Туннель нестабилен…';
+      break;
+    case 'restarting':
+      statusDot.classList.remove('on');
+      statusText.textContent = 'Пересоздание туннеля…';
+      break;
+    case 'healthy':
+    case 'up':
+      statusDot.classList.add('on');
+      statusText.textContent = 'Комната активна';
+      break;
+    default:
+      break;
+  }
+});
+
 function applyRoomModeUi(data) {
   const type = data.type || 'default';
 
@@ -425,13 +518,13 @@ socket.on('room:closed', () => {
   showNika('idle', 'Комната закрыта', 4000);
 });
 socket.on('room:updated', ({ players }) => {
-  const count = (players || []).length - 1; // без хоста
-  const label = count === 1 ? 'гость' : count < 5 ? 'гостя' : 'гостей';
+  const total = (players || []).length;
+  const guests = Math.max(0, total - 1); // без хоста
 
   if (currentRoomInfo?.type === 'static') {
-    $('static-visitors').textContent = `${count} ${label}`;
+    $('static-visitors').textContent = `${guests} ${pluralizeGuests(guests)}`;
   } else if (currentRoomInfo?.type === 'proxy') {
-    $('proxy-visitors').textContent = `${count} ${label}`;
+    $('proxy-visitors').textContent = `${guests} ${pluralizeGuests(guests)}`;
   }
   renderPlayers(players);
 });
@@ -544,6 +637,13 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
+}
+function pluralizeGuests(n) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'гость';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'гостя';
+  return 'гостей';
 }
 function updateGameControls() {
   const visible = !gameFrameWrap.hidden;
