@@ -44,5 +44,11 @@ export class RoomManager {
     if (!room) return;
     await room.close('closed');
     this.rooms.delete(roomId);
+
+    // Симметричная очистка: если у нас остались socket→room маппинги,
+    // указывающие на удалённую комнату, стираем их.
+    for (const [sid, id] of this.socketRoom) {
+      if (id === roomId) this.socketRoom.delete(sid);
+    }
   }
 }

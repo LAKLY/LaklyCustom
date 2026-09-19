@@ -5,9 +5,10 @@ import { pathToFileURL } from 'node:url';
 import unzipper from 'unzipper';
 import { EVENTS } from '../shared/events.js';
 
-const MAX_ZIP_SIZE = 10 * 1024 * 1024;          // 10 MB
-const MAX_EXTRACTED_SIZE = 50 * 1024 * 1024;    // 50 MB
+const MAX_ZIP_SIZE = 10 * 1024 * 1024;
+const MAX_EXTRACTED_SIZE = 50 * 1024 * 1024;
 const MAX_FILES = 500;
+const SUPPORTED_API_VERSION = 1;
 const ALLOWED_EXT = new Set([
   '.js', '.mjs', '.cjs', '.json',
   '.html', '.css',
@@ -19,12 +20,11 @@ const ALLOWED_EXT = new Set([
 export class PluginLoader {
   constructor(pluginsDir) {
     this.pluginsDir = pluginsDir;
-    this.plugins = new Map();   // id -> record
-    this.handlers = new Map();  // eventName -> [{ pluginName, handler }]
+    this.plugins = new Map();
+    this.handlers = new Map();
   }
 
   async load() {
-    // Сброс критичен — иначе при reload обработчики накапливаются
     this.plugins.clear();
     this.handlers.clear();
 
@@ -38,7 +38,8 @@ export class PluginLoader {
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      if (entry.name.startsWith('_install_')) continue; // временные
+      if (entry.name.startsWith('_install_')) continue;
+      if (entry.name.startsWith('_backup_')) continue;
       await this._loadOne(entry.name);
     }
   }
@@ -63,12 +64,20 @@ export class PluginLoader {
 
   async _loadOne(dirName) {
     const dir = path.join(this.pluginsDir, dirName);
-    const manifest = await this._readManifest(dir);
+    const rawManifest = await this._readManifest(dir);
+    const manifest = this._validateManifest(rawManifest, dirName);
 
-    const entryFile = manifest?.entry || 'index.js';
-    const entryPath = path.join(dir, entryFile);
+    if (!manifest) {
+      console.warn(`[plugins] ${dirName}: невалидный manifest, пропускаем`);
+      return;
+    }
+
+    const entryPath = path.join(dir, manifest.entry);
 
     try {
+      // Проверяем, что entry существует до импорта
+      await fs.access(entryPath, fs.constants.R_OK);
+
       const url = pathToFileURL(entryPath).href;
       const mod = await import(url);
       const plugin = mod.default;
@@ -77,29 +86,31 @@ export class PluginLoader {
         return;
       }
 
-      const id = this._sanitizeId(manifest?.id || plugin.name || dirName);
-      if (!id) {
-        console.warn(`[plugins] ${dirName}: некорректный id`);
-        return;
-      }
-
       const record = {
-        id,
-        name: plugin.name || manifest?.name || dirName,
-        version: plugin.version || manifest?.version || '0.0.0',
-        description: plugin.description || manifest?.description || '',
-        apiVersion: manifest?.apiVersion || 1,
+        id: manifest.id,
+        name: manifest.name,
+        version: manifest.version,
+        description: manifest.description,
+        apiVersion: manifest.apiVersion,
         entry: plugin,
         dir,
         publicDir: path.join(dir, 'public'),
         manifest,
       };
 
-      this.plugins.set(id, record);
-      this._registerHooks(id, plugin);
-      console.log(`[plugins] Загружен: ${id} v${record.version}`);
-      await this.emit(EVENTS.PLUGIN_LOADED, { name: id });
+      // Транзакционно: сначала плагин, потом hooks, потом событие
+      this._registerHooks(manifest.id, plugin);
+      this.plugins.set(manifest.id, record);
+      console.log(`[plugins] Загружен: ${manifest.id} v${manifest.version}`);
+      await this.emit(EVENTS.PLUGIN_LOADED, { name: manifest.id });
     } catch (err) {
+      // Откат регистрации при падении
+      this.plugins.delete(manifest.id);
+      for (const [event, list] of this.handlers) {
+        const filtered = list.filter(h => h.pluginName !== manifest.id);
+        if (filtered.length === 0) this.handlers.delete(event);
+        else this.handlers.set(event, filtered);
+      }
       console.error(`[plugins] Ошибка ${dirName}:`, err.message);
     }
   }
@@ -133,7 +144,7 @@ export class PluginLoader {
     }));
   }
 
-  // --- Установка из ZIP ---
+  // --- Установка из ZIP (атомарная) ---
 
   async installFromZip(zipPath) {
     const stat = await fs.stat(zipPath);
@@ -141,8 +152,12 @@ export class PluginLoader {
       throw new Error(`Архив слишком большой (макс ${MAX_ZIP_SIZE / 1024 / 1024} MB)`);
     }
 
-    const tmpDir = path.join(this.pluginsDir, `_install_${Date.now()}`);
+    const ts = Date.now();
+    const tmpDir = path.join(this.pluginsDir, `_install_${ts}`);
     await fs.mkdir(tmpDir, { recursive: true });
+
+    let backupDir = null;
+    let finalDir = null;
 
     try {
       await this._safeExtract(zipPath, tmpDir);
@@ -150,24 +165,51 @@ export class PluginLoader {
       const pluginRoot = await this._findPluginRoot(tmpDir);
       if (!pluginRoot) throw new Error('В архиве не найден плагин (manifest.json или index.js)');
 
-      const manifest = await this._readManifest(pluginRoot);
-      const rawId = manifest?.id || path.basename(pluginRoot);
-      const safeId = this._sanitizeId(rawId);
-      if (!safeId) throw new Error(`Некорректный id плагина: ${rawId}`);
+      const rawManifest = await this._readManifest(pluginRoot);
+      const manifest = this._validateManifest(rawManifest, path.basename(pluginRoot));
+      if (!manifest) throw new Error('Невалидный manifest.json');
 
-      const finalDir = path.join(this.pluginsDir, safeId);
-      await fs.rm(finalDir, { recursive: true, force: true });
+      // Проверяем, что entry существует
+      const entryPath = path.join(pluginRoot, manifest.entry);
+      try {
+        await fs.access(entryPath, fs.constants.R_OK);
+      } catch {
+        throw new Error(`Не найден файл плагина: ${manifest.entry}`);
+      }
 
+      finalDir = path.join(this.pluginsDir, manifest.id);
+
+      // Бэкап существующего
+      try {
+        await fs.access(finalDir);
+        backupDir = path.join(this.pluginsDir, `_backup_${manifest.id}_${ts}`);
+        await fs.rename(finalDir, backupDir);
+      } catch { /* не было старого */ }
+
+      // Переносим новый плагин
       if (pluginRoot === tmpDir) {
+        // плагин лежал в корне архива — переименовываем сам tmpDir
         await fs.rename(tmpDir, finalDir);
       } else {
         await fs.rename(pluginRoot, finalDir);
-        await fs.rm(tmpDir, { recursive: true, force: true });
+        await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+      }
+
+      // Успех — удаляем бэкап
+      if (backupDir) {
+        await fs.rm(backupDir, { recursive: true, force: true }).catch(() => {});
       }
 
       await this.load();
-      return safeId;
+      return manifest.id;
     } catch (err) {
+      // Откат: возвращаем backup на место
+      try {
+        if (backupDir && finalDir) {
+          await fs.rm(finalDir, { recursive: true, force: true }).catch(() => {});
+          await fs.rename(backupDir, finalDir).catch(() => {});
+        }
+      } catch {}
       await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
       throw err;
     }
@@ -230,6 +272,65 @@ export class PluginLoader {
       const raw = await fs.readFile(path.join(dir, 'manifest.json'), 'utf8');
       return JSON.parse(raw);
     } catch { return null; }
+  }
+
+  /**
+   * Валидирует manifest строго. Возвращает объект с полями { id, name, version,
+   * description, apiVersion, entry } или null, если manifest невалиден.
+   */
+  _validateManifest(raw, fallbackId) {
+    if (!raw || typeof raw !== 'object') {
+      // Разрешаем плагины без manifest, если у них есть index.js (legacy)
+      const id = this._sanitizeId(fallbackId);
+      if (!id) return null;
+      return {
+        id,
+        name: id,
+        version: '0.0.0',
+        description: '',
+        apiVersion: SUPPORTED_API_VERSION,
+        entry: 'index.js',
+      };
+    }
+
+    const id = this._sanitizeId(raw.id || fallbackId);
+    if (!id) return null;
+
+    const apiVersion = Number.isInteger(raw.apiVersion) ? raw.apiVersion : SUPPORTED_API_VERSION;
+    if (apiVersion !== SUPPORTED_API_VERSION) return null;
+
+    const version = typeof raw.version === 'string' && /^\d+\.\d+\.\d+/.test(raw.version)
+      ? raw.version
+      : '0.0.0';
+
+    const name = typeof raw.name === 'string' && raw.name.trim()
+      ? raw.name.trim().slice(0, 60)
+      : id;
+
+    const description = typeof raw.description === 'string'
+      ? raw.description.slice(0, 200)
+      : '';
+
+    // entry: если поле указано — оно должно быть валидным, иначе отклоняем манифест.
+    // Если поля нет — используем дефолт 'index.js' (для legacy-плагинов).
+    let entry = 'index.js';
+    if (raw.entry !== undefined) {
+    entry = this._validateEntry(raw.entry);
+    if (!entry) return null;
+    }
+
+    return { id, name, version, description, apiVersion, entry };
+  }
+
+  /**
+   * entry должен быть безопасным относительным путём к .js/.mjs файлу.
+   */
+  _validateEntry(entry) {
+    if (typeof entry !== 'string' || !entry) return null;
+    if (path.isAbsolute(entry)) return null;
+    if (entry.includes('..')) return null;
+    if (!/^[a-zA-Z0-9_\-./]+\.(js|mjs)$/.test(entry)) return null;
+    return entry;
   }
 
   _sanitizeId(id) {

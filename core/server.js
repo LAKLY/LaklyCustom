@@ -69,7 +69,7 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
     res.json({
       isActive: true,
       roomName: first.name,
-      publicUrl,
+      publicUrl: first.publicUrl,
       gameActive: first.gameActive,
       activePlugin: first.activePluginName,
       ...first.publicPlayers(),
@@ -81,13 +81,14 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
     res.json({ plugins: pluginLoader.list() });
   });
 
-  app.get('/api/qr', async (_req, res) => {
-    if (!publicUrl) return res.status(400).json({ error: 'no room' });
-    try {
-      const qr = await QRCode.toDataURL(publicUrl, { margin: 1, width: 260 });
-      res.json({ qr });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
+    app.get('/api/qr', async (_req, res) => {
+      const first = [...roomManager.rooms.values()].find(r => r.isActive);
+      if (!first || !first.publicUrl) return res.status(400).json({ error: 'no room' });
+      try {
+        const qr = await QRCode.toDataURL(first.publicUrl, { margin: 1, width: 260 });
+        res.json({ qr });
+      } catch (e) { res.status(500).json({ error: e.message }); }
+    });
 
   io.on('connection', (socket) => {
     console.log('[io] connected', socket.id);
@@ -115,7 +116,8 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
         tunnelInstance = t.instance;
         publicUrl = t.url;
       }
-      room.publicUrl = publicUrl;
+      // URL с токеном — секретная ссылка для приглашения
+      room.publicUrl = `${publicUrl}?t=${room.joinToken}`;
 
       socket.emit('host:room-created', {
         roomId: room.id,
@@ -166,6 +168,13 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
         ? roomManager.getRoom(roomId)
         : [...roomManager.rooms.values()].find(r => r.isActive);
       if (!room || !room.isActive) { socket.emit('error', 'Комната не активна'); return; }
+
+      // Проверка секретного токена из ссылки
+      const token = typeof payload.token === 'string' ? payload.token : '';
+      if (room.joinToken && token !== room.joinToken) {
+        socket.emit('error', 'Ссылка недействительна');
+        return;
+      }
 
       roomManager.bind(socket.id, room.id);
       const player = await room.addPlayer(socket, name);

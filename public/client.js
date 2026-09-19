@@ -1,4 +1,4 @@
-const socket = io();
+const joinToken = new URLSearchParams(location.search).get('t') || '';
 const $ = id => document.getElementById(id);
 let me = null;
 let messages = [];
@@ -14,7 +14,7 @@ function join() {
   const name = $('player-name').value.trim();
   if (!name) { $('join-error').textContent = 'Введите имя'; return; }
   $('join-error').textContent = '';
-  socket.emit('player:join', { playerName: name });
+  socket.emit('player:join', { playerName: name, token: joinToken });
 }
 
 $('btn-join').onclick = join;

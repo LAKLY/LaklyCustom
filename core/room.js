@@ -12,7 +12,6 @@ export class Room {
     this.pluginLoader = pluginLoader;
     this.hostSocketId = hostSocket.id;
 
-    // Токены доступа (не публикуем наружу)
     this.joinToken = uuidv4();
     this.hostToken = uuidv4();
 
@@ -115,12 +114,17 @@ export class Room {
   }
 
   async handleGameAction(socket, action, data) {
+    // Игра не запущена — не пропускаем действия
+    if (!this.gameActive || !this.activePluginName) return;
+    if (!this.pluginLoader.get(this.activePluginName)) return;
+
     const player = this.players.get(socket.id);
     const isHost = socket.id === this.hostSocketId;
     if (!player && !isHost) return;
 
     await this.pluginLoader.emit(EVENTS.GAME_ACTION, {
       room: this,
+      plugin: this.activePluginName,
       socket,
       player: player || { id: 'host', name: 'Хост', color: '#00F5FF', isHost: true },
       action,
@@ -132,17 +136,18 @@ export class Room {
     if (!this.isActive) return;
     this.isActive = false;
 
-    // 1. Плагины получают шанс отправить последнее сообщение
+    // 1. Плагины могут разослать финальное сообщение, игроки ещё онлайн
     await this.pluginLoader.emit(EVENTS.ROOM_CLOSING, { room: this, reason });
 
     // 2. Оповещаем клиентов
     this.broadcast(EVENTS.ROOM_CLOSED_NOTIFY, { reason });
 
-    // 3. Финальное закрытие + очистка plugin state
-    await this.pluginLoader.emit(EVENTS.ROOM_CLOSED, { room: this, reason });
-    await this.pluginLoader.emit(EVENTS.ROOM_DESTROYED, { roomId: this.id });
-
+    // 3. Очищаем игроков и чат (до ROOM_CLOSED — как в docs)
     this.players.clear();
     this.messages = [];
+
+    // 4. Финальное закрытие + очистка plugin state
+    await this.pluginLoader.emit(EVENTS.ROOM_CLOSED, { room: this, reason });
+    await this.pluginLoader.emit(EVENTS.ROOM_DESTROYED, { roomId: this.id });
   }
 }

@@ -1,9 +1,27 @@
+// electron/main.js
 import { app, BrowserWindow, shell, Tray, Menu, nativeImage, ipcMain, Notification, dialog } from 'electron';
 import { startServer } from '../core/server.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import unzipper from 'unzipper';
+
+// ─── Подавляем шум от untun при закрытии cloudflared ──────────
+// Ставим ДО app.whenReady, иначе Electron перехватит первым.
+const _origUnhandled = process.listeners('unhandledRejection').slice();
+process.removeAllListeners('unhandledRejection');
+process.on('unhandledRejection', (reason) => {
+  const msg = String(reason?.message || reason || '');
+  if (msg.includes('cloudflared exited') || msg.includes('before URL was ready')) {
+    console.log('[tunnel] cloudflared завершился (норма при закрытии)');
+    return;
+  }
+  console.error('[unhandled]', reason);
+  for (const l of _origUnhandled) {
+    try { l(reason); } catch {}
+  }
+});
+// ──────────────────────────────────────────────────────────────
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');

@@ -1,6 +1,7 @@
 const socket = io();
 const $ = id => document.getElementById(id);
 
+// Навигация
 document.querySelectorAll('.nav-item').forEach(btn => {
   btn.onclick = () => {
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
@@ -10,32 +11,32 @@ document.querySelectorAll('.nav-item').forEach(btn => {
   };
 });
 
-const statusDot = $('status-dot');
-const statusText = $('status-text');
-const btnStart = $('btn-start');
-const btnStop = $('btn-stop');
-const btnJoinGuest = $('btn-join-guest');
-const btnCopy = $('btn-copy');
-const btnSend = $('btn-send');
-const roomUrl = $('room-url');
-const chatInput = $('chat-input');
-const playersEl = $('players');
-const chatEl = $('chat');
-const qrEl = $('qr');
-const pluginSelect = $('plugin-select');
-const gameFrame = $('game-frame');
+const statusDot     = $('status-dot');
+const statusText    = $('status-text');
+const btnStart      = $('btn-start');
+const btnStop       = $('btn-stop');
+const btnJoinGuest  = $('btn-join-guest');
+const btnCopy       = $('btn-copy');
+const btnSend       = $('btn-send');
+const roomUrl       = $('room-url');
+const chatInput     = $('chat-input');
+const playersEl     = $('players');
+const chatEl        = $('chat');
+const qrEl          = $('qr');
+const pluginSelect  = $('plugin-select');
+const gameFrame     = $('game-frame');
 const gameFrameWrap = $('game-frame-wrap');
-const gameStatus = $('game-status');
-const btnGameStart = $('btn-game-start');
-const btnGameStop = $('btn-game-stop');
-const dropZone = $('drop-zone');
+const gameStatus    = $('game-status');
+const btnGameStart  = $('btn-game-start');
+const btnGameStop   = $('btn-game-stop');
+const dropZone      = $('drop-zone');
 const btnInstallPlugin = $('btn-install-plugin');
 
 let messages = [];
 let activePluginName = null;
 let progressTimer = null;
 let lastGameState = null;
-let meAsHost = { playerId: 'host', playerName: 'Хост', playerColor: '#00F5FF' };
+const meAsHost = { playerId: 'host', playerName: 'Хост', playerColor: '#00F5FF' };
 
 function toast(text) {
   const el = $('toast');
@@ -46,7 +47,7 @@ function toast(text) {
 }
 
 function startProgressHints() {
-  const hints = ['Готовим сервер…', 'Открываем туннель…', 'Получаем адрес…', 'Почти готово…'];
+  const hints = ['Готовим сервер…', 'Открываем туннель…', 'Получаем адрес…', 'Проверяем связь…'];
   let i = 0;
   statusText.textContent = hints[0];
   progressTimer = setInterval(() => {
@@ -59,22 +60,32 @@ function stopProgressHints() {
   progressTimer = null;
 }
 
+function makeOption(value, label) {
+  const opt = document.createElement('option');
+  opt.value = value;
+  opt.textContent = label;
+  return opt;
+}
+
 async function loadPlugins() {
+  const listEl = $('plugins-list');
   try {
     const r = await fetch('/api/plugins');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     const j = await r.json();
 
-    // Селект — строим через DOM, чтобы не инжектить HTML из данных
     pluginSelect.innerHTML = '';
     pluginSelect.append(makeOption('', '— Без плагина (только чат) —'));
     for (const p of j.plugins) {
       pluginSelect.append(makeOption(p.id, `${p.name} — ${p.description || ''}`));
     }
 
-    const listEl = $('plugins-list');
     listEl.innerHTML = '';
     if (!j.plugins.length) {
-      listEl.innerHTML = '<div class="empty">Плагины не найдены. Перетащите ZIP-архив в окно.</div>';
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'Плагины не найдены. Перетащите ZIP-архив в окно.';
+      listEl.append(empty);
       return;
     }
     for (const p of j.plugins) {
@@ -92,16 +103,17 @@ async function loadPlugins() {
       item.append(nameEl, verEl, descEl);
       listEl.append(item);
     }
-  } catch (e) { console.error(e); }
+  } catch (err) {
+    console.error('[loadPlugins]', err);
+    listEl.innerHTML = '';
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'Не удалось загрузить список плагинов';
+    listEl.append(empty);
+  }
 }
 
-function makeOption(value, label) {
-  const opt = document.createElement('option');
-  opt.value = value;
-  opt.textContent = label;
-  return opt;
-}
-
+// --- Кнопки ---
 btnStart.onclick = () => {
   btnStart.disabled = true;
   startProgressHints();
@@ -146,6 +158,7 @@ function sendChat() {
   chatInput.value = '';
 }
 
+// --- Socket ---
 socket.on('host:room-created', async (data) => {
   stopProgressHints();
   statusDot.classList.add('on');
@@ -158,7 +171,7 @@ socket.on('host:room-created', async (data) => {
   btnJoinGuest.disabled = false;
   btnSend.disabled = false;
   chatInput.disabled = false;
-  btnGameStart.disabled = false;
+  btnGameStart.disabled = !data.activePlugin;
 
   activePluginName = data.activePlugin || null;
   updateGameControls();
@@ -212,25 +225,10 @@ socket.on('game:state', (data) => {
   }
 });
 
-// Мост iframe ↔ родитель
-window.addEventListener('message', (e) => {
-  if (!e.data || typeof e.data !== 'object') return;
-
-  if (e.data.type === 'lakly:ready') {
-    if (gameFrame?.contentWindow) {
-      gameFrame.contentWindow.postMessage({
-        type: 'lakly:init',
-        player: meAsHost,
-      }, '*');
-      if (lastGameState) {
-        gameFrame.contentWindow.postMessage({ type: 'lakly:state', data: lastGameState }, '*');
-      }
-    }
-  }
-
-  if (e.data.type === 'lakly:action') {
-    socket.emit('game:action', { action: e.data.action, data: e.data.data });
-  }
+socket.on('error', (msg) => {
+  toast(typeof msg === 'string' ? msg : 'Ошибка');
+  stopProgressHints();
+  btnStart.disabled = false;
 });
 
 socket.on('disconnect', () => {
@@ -238,6 +236,26 @@ socket.on('disconnect', () => {
   statusText.textContent = 'Нет связи с сервером';
 });
 
+// --- Один обработчик message от iframe, с проверкой source ---
+window.addEventListener('message', (e) => {
+  if (!gameFrame?.contentWindow || e.source !== gameFrame.contentWindow) return;
+  if (!e.data || typeof e.data !== 'object') return;
+
+  if (e.data.type === 'lakly:ready') {
+    gameFrame.contentWindow.postMessage({ type: 'lakly:init', player: meAsHost }, '*');
+    if (lastGameState) {
+      gameFrame.contentWindow.postMessage({ type: 'lakly:state', data: lastGameState }, '*');
+    }
+    return;
+  }
+
+  if (e.data.type === 'lakly:action') {
+    if (typeof e.data.action !== 'string') return;
+    socket.emit('game:action', { action: e.data.action, data: e.data.data });
+  }
+});
+
+// --- Рендер ---
 async function refreshPlayers() {
   try {
     const r = await fetch('/api/room');
@@ -280,8 +298,9 @@ function escapeHtml(s) {
 }
 
 function updateGameControls() {
-  btnGameStart.disabled = !activePluginName || gameFrameWrap.style.display === 'block';
-  btnGameStop.disabled = gameFrameWrap.style.display !== 'block';
+  const visible = gameFrameWrap.style.display === 'block';
+  btnGameStart.disabled = !activePluginName || visible;
+  btnGameStop.disabled = !visible;
 }
 
 function resetUi() {
@@ -310,10 +329,12 @@ function resetUi() {
 
 async function loadSettings() {
   if (!window.lakly) return;
-  const s = await window.lakly.getSettings();
-  $('set-tunnel').value = s.tunnel || 'auto';
-  $('set-ngrok-token').value = s.ngrokToken || '';
-  $('set-port').value = s.port || 3000;
+  try {
+    const s = await window.lakly.getSettings();
+    $('set-tunnel').value = s.tunnel || 'auto';
+    $('set-ngrok-token').value = s.ngrokToken || '';
+    $('set-port').value = s.port || 3000;
+  } catch (e) { console.error('[loadSettings]', e); }
 }
 
 $('btn-save-settings').onclick = async () => {
@@ -326,26 +347,7 @@ $('btn-save-settings').onclick = async () => {
   toast('Сохранено. Перезапустите приложение.');
 };
 
-window.addEventListener('message', (e) => {
-  // Принимаем только сообщения от собственного iframe
-  if (!gameFrame?.contentWindow || e.source !== gameFrame.contentWindow) return;
-  if (!e.data || typeof e.data !== 'object') return;
-
-  if (e.data.type === 'lakly:ready') {
-    gameFrame.contentWindow.postMessage({ type: 'lakly:init', player: meAsHost }, '*');
-    if (lastGameState) {
-      gameFrame.contentWindow.postMessage({ type: 'lakly:state', data: lastGameState }, '*');
-    }
-    return;
-  }
-
-  if (e.data.type === 'lakly:action') {
-    if (typeof e.data.action !== 'string') return;
-    socket.emit('game:action', { action: e.data.action, data: e.data.data });
-  }
-});
-
-// Drag & Drop установка плагинов
+// --- Drag & Drop установка плагинов ---
 let dragCounter = 0;
 document.addEventListener('dragenter', (e) => {
   e.preventDefault();
@@ -396,6 +398,7 @@ btnInstallPlugin.onclick = () => {
   input.click();
 };
 
+// --- Трей-события ---
 if (window.lakly?.onTrayCloseRoom) {
   window.lakly.onTrayCloseRoom(() => {
     if (!btnStop.disabled) socket.emit('host:close-room');
@@ -406,3 +409,9 @@ if (window.lakly?.onTrayCreateRoom) {
     if (!btnStart.disabled) btnStart.click();
   });
 }
+
+// --- Запуск при загрузке окна ---
+window.addEventListener('load', () => {
+  loadSettings();
+  loadPlugins();
+});
