@@ -41,9 +41,6 @@ Create a room. Share the link. Play together.
 
 ### 🎮 Multiplayer rooms
 Real-time players, chat, and games. Everything lives in a single lobby.
-Хочешь написать плагин через ИИ? Скорми ему docs/PLUGIN_API.md и папку plugins/_template/. 
-Спецификация покрывает всё: события, postMessage-протокол, ограничения, частые ошибки. 
-Без неё ИИ будет выдумывать несуществующие API.
 
 </td>
 <td width="50%" valign="top">
@@ -289,5 +286,9 @@ MIT — use it, fork it, break it, fix it.
 **LaklyCustom**
 
 *Play together. Keep it local.*
+
+Хочешь написать плагин через ИИ? Скорми ему docs/PLUGIN_API.md и папку plugins/_template/. 
+Спецификация покрывает всё: события, postMessage-протокол, ограничения, частые ошибки. 
+Без неё ИИ будет выдумывать несуществующие API.
 
 </div>
