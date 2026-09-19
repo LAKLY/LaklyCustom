@@ -6,7 +6,6 @@ import { startServer } from '../core/server.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import unzipper from 'unzipper';
 
 // ─── Подавляем шум от untun при закрытии cloudflared ──────────
 const _origUnhandled = process.listeners('unhandledRejection').slice();
@@ -31,7 +30,6 @@ const pluginDataDir = path.join(app.getPath('userData'), 'plugin-data');
 let win = null, srv = null, tray = null;
 let playerCount = 0, roomActive = false;
 
-// Папки, которые пользователь явно выбрал через нативный диалог.
 const allowedStaticDirs = new Set();
 
 const DEFAULT_SETTINGS = {
@@ -96,7 +94,6 @@ ipcMain.handle('dialog:pick-directory', async () => {
   } catch (e) {
     console.warn('[static-dirs] не удалось сохранить whitelist:', e.message);
   }
-
   return dir;
 });
 
@@ -114,8 +111,7 @@ function loadIcon(relativePath) {
   return nativeImage.createEmpty();
 }
 
-// Кэш tray-иконок: три состояния → nativeImage.
-// Загружаются один раз, дальше переиспользуются.
+// Кэш tray-иконок: три состояния → nativeImage. Загружаются один раз.
 const TRAY_ICON_FILES = {
   idle:   'tray/tray-idle.png',
   active: 'tray/tray-active.png',
@@ -125,13 +121,9 @@ const trayIconCache = new Map();
 
 function loadTrayIcon(state = 'idle') {
   if (trayIconCache.has(state)) return trayIconCache.get(state);
-
   const file = TRAY_ICON_FILES[state] || TRAY_ICON_FILES.idle;
   let icon = loadIcon(file);
-  if (icon.isEmpty()) {
-    // Fallback: если конкретной tray-иконки нет — берём общую.
-    icon = loadIcon('icon/icon-64.png');
-  }
+  if (icon.isEmpty()) icon = loadIcon('icon/icon-64.png');
   trayIconCache.set(state, icon);
   return icon;
 }
@@ -141,28 +133,47 @@ function loadWindowIcon() {
 }
 
 // ─── Трей ─────────────────────────────────────────────────────
-// Мемоизация: не дёргаем setImage/setToolTip без реальной смены состояния.
-const trayMemo = { image: null, tooltip: null };
+// Три важные вещи, чтобы Windows не плодил «призрачные» иконки:
+// 1) Дебаунс refreshTray — setImage дёргается не чаще, чем раз в 300мс.
+// 2) setImage только когда окно скрыто/свёрнуто. Пока окно открыто,
+//    состояние видно в сайдбаре, а лишние смены HWND в трее —
+//    основная причина «призраков» при частых событиях игроков.
+// 3) Явный tray.destroy() на выходе + при закрытии окна в трей.
 
-// Правило: idle → комнаты нет, active → комната есть, но пусто,
-//         busy → в комнате есть хотя бы один гость.
+const TRAY_REFRESH_DEBOUNCE_MS = 300;
+const trayMemo = { image: null, tooltip: null, menuHash: null };
+let trayRefreshTimer = null;
+
 function computeTrayState() {
   if (!roomActive) return 'idle';
   return playerCount > 0 ? 'busy' : 'active';
 }
 
+function trayMenuSignature() {
+  // Хеш зависит только от того, что реально меняет состав меню.
+  return `${roomActive ? 1 : 0}`;
+}
+
 function refreshTray() {
+  clearTimeout(trayRefreshTimer);
+  trayRefreshTimer = setTimeout(applyTrayUpdate, TRAY_REFRESH_DEBOUNCE_MS);
+  trayRefreshTimer.unref?.();
+}
+
+function applyTrayUpdate() {
+  trayRefreshTimer = null;
   if (!tray) return;
 
-  // Иконка
   const state = computeTrayState();
-  if (state !== trayMemo.image) {
+  const windowVisible = !!win && win.isVisible() && !win.isMinimized();
+
+  // Иконку меняем только когда окно скрыто — это ключевой фикс.
+  if (!windowVisible && state !== trayMemo.image) {
     const icon = loadTrayIcon(state);
     if (!icon.isEmpty()) tray.setImage(icon);
     trayMemo.image = state;
   }
 
-  // Tooltip
   const tooltip = roomActive
     ? `LaklyCustom\nКомната активна · игроков: ${playerCount}`
     : 'LaklyCustom\nКомната не запущена';
@@ -171,7 +182,14 @@ function refreshTray() {
     trayMemo.tooltip = tooltip;
   }
 
-  // Меню — пересобираем всегда, оно зависит от roomActive.
+  const sig = trayMenuSignature();
+  if (sig !== trayMemo.menuHash) {
+    tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenu()));
+    trayMemo.menuHash = sig;
+  }
+}
+
+function buildTrayMenu() {
   const items = [
     { label: 'Открыть окно', click: () => win?.show() },
     { type: 'separator' },
@@ -191,30 +209,37 @@ function refreshTray() {
 
   items.push(
     { type: 'separator' },
-    {
-      label: 'Горячие клавиши',
-      enabled: false,
-    },
+    { label: 'Горячие клавиши', enabled: false },
     { label: '  Ctrl+Alt+L — показать окно', enabled: false },
     { label: '  Ctrl+Alt+C — создать комнату', enabled: false },
     { type: 'separator' },
     { label: 'Выход', click: () => { app.isQuitting = true; app.quit(); } },
   );
-
-  tray.setContextMenu(Menu.buildFromTemplate(items));
+  return items;
 }
 
 function createTray() {
-  // Прогреваем кэш всех трёх состояний, чтобы первое переключение
-  // не мигало и не подгружало файл с диска в момент события.
+  // Прогреваем кэш всех трёх иконок заранее — чтобы первое переключение
+  // не мигало и не грузило файл с диска.
   loadTrayIcon('idle');
   loadTrayIcon('active');
   loadTrayIcon('busy');
 
   tray = new Tray(loadTrayIcon('idle'));
   trayMemo.image = 'idle';
-  refreshTray();
+  trayMemo.tooltip = null;
+  trayMemo.menuHash = null;
+  applyTrayUpdate();
   tray.on('click', () => win?.isVisible() ? win.hide() : win?.show());
+}
+
+function destroyTray() {
+  if (trayRefreshTimer) {
+    clearTimeout(trayRefreshTimer);
+    trayRefreshTimer = null;
+  }
+  try { tray?.destroy(); } catch {}
+  tray = null;
 }
 
 // ─── Уведомления ──────────────────────────────────────────────
@@ -294,6 +319,13 @@ async function bootstrap() {
     }
   });
 
+  // Пересчитываем трей при смене видимости, чтобы после сворачивания
+  // иконка сразу приняла актуальное состояние.
+  win.on('show', () => refreshTray());
+  win.on('hide', () => refreshTray());
+  win.on('minimize', () => refreshTray());
+  win.on('restore', () => refreshTray());
+
   win.on('closed', () => { win = null; });
 
   createTray();
@@ -319,12 +351,14 @@ app.on('before-quit', async (e) => {
   e.preventDefault();
   quitting = true;
   app.isQuitting = true;
+  destroyTray();
   try { await srv?.close?.(); } catch {}
   app.quit();
 });
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  destroyTray();
 });
 
 app.on('activate', () => {
