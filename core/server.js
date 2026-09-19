@@ -23,6 +23,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const PROXY_CHECK_RATE = { max: 30, windowMs: 60_000 };
 
+// В dev-режиме плагины лежат в <project>/plugins.
+// В собранном .exe (electron-builder) — в resources/plugins,
+// потому что папка вынесена в extraResources (asar её не читает).
+const PLUGINS_DIR = process.env.LAKLY_RESOURCES
+  ? path.join(process.env.LAKLY_RESOURCES, 'plugins')
+  : path.join(ROOT, 'plugins');
+
 function buildCorsOrigin() {
   return (origin, cb) => {
     if (!origin) return cb(null, true);
@@ -64,7 +71,7 @@ export async function startServer({
 
   app.use(express.json({ limit: '128kb' }));
 
-  const pluginLoader = new PluginLoader(path.join(ROOT, 'plugins'), { pluginDataDir });
+  const pluginLoader = new PluginLoader(PLUGINS_DIR, { pluginDataDir });
   const roomManager = new RoomManager(io, pluginLoader);
   pluginLoader.attachServer({ io, roomManager });
   await pluginLoader.load();
@@ -434,6 +441,8 @@ export async function startServer({
       if (!limiter.check(`chat:${socket.id}`, RATE_LIMITS.CHAT)) return;
       const room = roomManager.getRoomBySocket(socket.id);
       if (!room) return;
+      // Чат отключён хостом при создании комнаты.
+      if (room.options?.chatEnabled === false) return;
       const text = validateChatMessage(payload.text);
       if (!text) return;
       const p = room.players.get(socket.id);

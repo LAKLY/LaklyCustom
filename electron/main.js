@@ -269,6 +269,13 @@ const serverHooks = {
 
 // ─── Bootstrap ────────────────────────────────────────────────
 async function bootstrap() {
+  // Сообщаем ядру, где искать папки plugins/ и другие ресурсы
+  // в упакованном приложении. В dev-режиме app.isPackaged === false,
+  // и переменная не выставляется — ядро использует локальные пути.
+  if (app.isPackaged) {
+    process.env.LAKLY_RESOURCES = process.resourcesPath;
+  }
+
   Menu.setApplicationMenu(null);
 
   const settings = await readSettings();
