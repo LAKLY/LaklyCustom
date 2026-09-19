@@ -1,382 +1,313 @@
-```markdown
 <div align="center">
 
 # LaklyCustom
 
-**Desktop-утилита для запуска локальных комнат с доступом через браузер**
+### 🎮 Локальные комнаты. Игры. Ссылка — и вы вместе.
 
-Хост нажимает «Создать комнату» → получает публичную ссылку → друзья открывают её без установки.
+**LaklyCustom** — desktop-приложение для создания локальных multiplayer-комнат и публикации их в интернет.
 
-[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Electron](https://img.shields.io/badge/electron-33-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
-[![Socket.IO](https://img.shields.io/badge/socket.io-4-010101?style=flat-square&logo=socket.io&logoColor=white)](https://socket.io/)
+Хост запускает комнату → получает ссылку и QR-код → друзья открывают ссылку в браузере.
 
-[Возможности](#-возможности) · [Быстрый старт](#-быстрый-старт) · [Плагины](#-плагины) · [Безопасность](#-безопасность) · [Диагностика](#-диагностика)
+<br>
+
+[![Electron](https://img.shields.io/badge/Electron-33-47848F?style=flat-square\&logo=electron\&logoColor=white)](https://www.electronjs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-ESM-339933?style=flat-square\&logo=node.js\&logoColor=white)](https://nodejs.org/)
+[![Socket.IO](https://img.shields.io/badge/Socket.IO-4-010101?style=flat-square\&logo=socket.io\&logoColor=white)](https://socket.io/)
+[![Cloudflare](https://img.shields.io/badge/Tunnel-Cloudflare-F38020?style=flat-square\&logo=cloudflare\&logoColor=white)](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
 
 </div>
 
 ---
 
-## 📖 О проекте
+## ✨ Что это
 
-LaklyCustom — это **local-first утилита**, а не облачный сервис. Она живёт в трее, открывает комнату в один клик и не требует ни регистрации, ни токенов, ни настройки DNS.
+LaklyCustom создан вокруг простой идеи:
 
-**Кому подойдёт:**
+> **локальное приложение должно уметь превращаться в общую комнату одним кликом.**
 
-- 🎮 Друзьям, которые хотят поиграть вместе без установки чего-либо
-- 💻 Разработчикам, которым нужно показать `localhost:5173` коллеге или заказчику
-- 📁 Тем, кто хочет раздать HTML-сайт из папки по ссылке за 10 секунд
+Не нужно поднимать отдельный сервер для друзей, покупать домен или вручную настраивать reverse proxy.
 
----
+LaklyCustom запускает локальный сервер, создаёт комнату и предоставляет гостям веб-интерфейс.
 
-## ✨ Возможности
+### Сейчас доступны три режима
 
-| | Что умеет |
-|---|---|
-| 🌐 | **Публичный доступ** — Cloudflare Quick Tunnel, без токенов и регистраций |
-| 🎮 | **Плагины** — игры, викторины, голосования; устанавливаются как ZIP |
-| 📱 | **Гости по ссылке или QR** — ничего не ставят, просто открывают браузер |
-| 💬 | **Чат и лобби** — общение в реальном времени |
-| 📁 | **Раздача папки** — показать друзьям HTML-сайт с диска |
-| 🔌 | **Прокси локального порта** — пробросить `localhost:5173` наружу (Vite, Next, Angular…) |
-| 📦 | **Drag & drop плагинов** — ZIP прямо в окно |
-| 🖥 | **Трей, уведомления, горячие клавиши** — работа в фоне |
-| 🔁 | **Автовосстановление туннеля** — при падении сети или edge туннель пересоздаётся |
+| Режим                | Назначение                                      |
+| -------------------- | ----------------------------------------------- |
+| 🎮 **Плагин / чат**  | Multiplayer-комнаты с играми и чатом            |
+| 📁 **Раздать папку** | Публикация локальной HTML-папки                 |
+| 🔌 **Прокси порт**   | Публикация уже запущенного localhost-приложения |
 
 ---
 
-## 🚀 Быстрый старт
+## 🎮 Multiplayer
 
-### Требования
+В режиме комнаты с плагином гости получают обычный веб-интерфейс:
 
-- **Node.js 20 LTS** или новее
-- Windows / macOS / Linux
+* имя игрока;
+* список игроков;
+* realtime-чат;
+* multiplayer-игру;
+* состояние комнаты;
+* подключение с телефона или компьютера.
 
-> На Node 24 возможны капризы `postinstall` у Electron. Если падает с `Electron failed to install correctly` — используйте Node 20 или добавьте зеркало:
-> ```powershell
-> $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
-> npm install
-> ```
+Гостю не требуется устанавливать LaklyCustom.
 
-### Установка
-
-```bash
-git clone https://github.com/LAKLY/LaklyCustom
-cd LaklyCustom
-npm install
-npm start
-```
-
-Приложение запустится, иконка появится в трее. Нажмите **«Создать комнату»** — через несколько секунд получите ссылку и QR-код.
-
-### Скрипты
-
-| Команда | Что делает |
-|---------|-----------|
-| `npm start` | Запуск Electron-приложения |
-| `npm run dev` | Режим разработки с DevTools |
-| `npm test` | Unit-тесты (node:test) |
-| `npm run test:watch` | Тесты в watch-режиме |
+Достаточно открыть ссылку комнаты.
 
 ---
 
-## 🏗 Как это работает
+## 🧩 Плагины
 
-```
-┌─────────────────────────────────────────┐
-│  Electron main process                  │
-│  окно хоста · трей · IPC · уведомления  │
-├─────────────────────────────────────────┤
-│  Core (Node.js)                         │
-│  Express · Socket.IO · RoomManager      │
-│  PluginLoader · TunnelSupervisor        │
-├─────────────────────────────────────────┤
-│  Plugins (server + client)              │
-│  hooks реагируют на события ядра        │
-│  game.html живёт в <iframe>             │
-├─────────────────────────────────────────┤
-│  UI                                     │
-│  /host — панель в Electron              │
-│  /     — гостевая страница в браузере   │
-│  /plugins/<id>/ — статика плагина       │
-└─────────────────────────────────────────┘
+Игры в LaklyCustom сделаны как плагины.
+
+Пример существующего плагина:
+
+```text
+plugins/
+└── clicker/
+    ├── manifest.json
+    ├── index.js
+    └── public/
+        └── game.html
 ```
 
-### Режимы комнаты
-
-| Режим | Что даёт гостям |
-|-------|-----------------|
-| `default` | Лобби, чат, плагины (игры) |
-| `static` | HTML-сайт из выбранной папки |
-| `proxy` | Проброс локального порта (dev-preview) |
-
-### Провайдеры туннелей
-
-Перебираются по приоритету:
-
-1. **Cloudflare Quick Tunnel** — работает всегда, без токена
-2. **ngrok** — если задан `NGROK_TOKEN`
-3. **localhost** — fallback, только локальная сеть
-
-`TunnelSupervisor` проверяет туннель каждые 45 секунд (интернет → локальный сервер → публичный URL) и пересоздаёт при устойчивых сбоях. При смене URL ссылка и QR обновляются автоматически, гостям приходит системное сообщение в чат.
-
----
-
-## 📁 Структура проекта
-
-```
-LaklyCustom/
-├── core/                    # Ядро
-│   ├── server.js            # Express + Socket.IO
-│   ├── room-manager.js      # Реестр комнат
-│   ├── room.js              # Одна комната
-│   ├── plugin-loader.js     # Загрузка плагинов из plugins/
-│   ├── plugin-host.js       # Sandbox плагина (worker_threads)
-│   ├── plugin-worker.js     # Изолированный воркер
-│   ├── proxy.js             # http-proxy + WS upgrade
-│   ├── tunnel-supervisor.js # Health-check и авто-пересоздание туннеля
-│   └── tunnels/             # Провайдеры: cloudflare / ngrok / local
-├── electron/                # Electron main + preload
-├── ui/                      # Хост-панель (/host)
-├── public/                  # Гостевая страница (/)
-├── plugins/                 # Установленные плагины
-│   ├── clicker/
-│   └── quiz/
-├── shared/                  # Общие модули (events, validation, rate-limit)
-├── assets/                  # Иконки, маскот Ника, tray-иконки
-└── tests/                   # node:test
-```
-
----
-
-## 🎮 Плагины
-
-### Структура
-
-```
-plugins/my-plugin/
-├── manifest.json        ← метаданные
-├── index.js             ← серверная логика (hooks)
-├── config.json          ← (опционально) дефолтный конфиг
-└── public/
-    └── game.html        ← UI игры в <iframe>
-```
-
-### manifest.json
+Минимальный `manifest.json`:
 
 ```json
 {
-  "id": "my-plugin",
-  "name": "My Plugin",
+  "id": "clicker",
+  "name": "Clicker",
   "version": "1.0.0",
   "apiVersion": 1,
   "entry": "index.js",
-  "description": "Короткое описание"
+  "description": "Общий счётчик кликов"
 }
 ```
 
-Обязательные: `id` (совпадает с именем папки), `version`, `apiVersion`.  
-`id` — только `[a-z0-9_-]`, начинается с буквы или цифры, до 40 символов.
+Плагин может содержать:
 
-### Хуки
+* серверную multiplayer-логику;
+* собственное состояние игры;
+* клиентский интерфейс;
+* обработчики действий игроков;
+* конфигурацию.
 
-Плагин экспортирует `default` с полем `hooks`:
+Игровой интерфейс запускается внутри `iframe`, а обмен событиями между игрой и LaklyCustom происходит через `postMessage`.
 
-```js
-import { EVENTS } from '../../shared/events.js';
+---
 
-const state = new Map();
+## 🌐 Как появляется публичная ссылка
 
-export default {
-  name: 'my-plugin',
-  version: '1.0.0',
+LaklyCustom поднимает локальный HTTP-сервер и подключает tunnel provider.
 
-  // Опционально: получение конфига
-  onConfig(config) { /* ... */ },
+По умолчанию используется:
 
-  hooks: {
-    [EVENTS.ROOM_CREATED]:   ({ room }) => { state.set(room.id, {}); },
-    [EVENTS.ROOM_DESTROYED]: ({ roomId }) => { state.delete(roomId); },
-    [EVENTS.PLAYER_JOINED]:  ({ room, socket, player }) => {},
-    [EVENTS.PLAYER_LEFT]:    ({ room, player }) => {},
-    [EVENTS.PLAYER_KICKED]:  ({ room, player }) => {},
-    [EVENTS.GAME_START]:     ({ room, plugin }) => {},
-    [EVENTS.GAME_STOP]:      ({ room, plugin }) => {},
-    [EVENTS.GAME_ACTION]:    ({ room, player, action, data }) => {},
-  },
-};
+```text
+Cloudflare Quick Tunnel
+        ↓
+локальный LaklyCustom
+        ↓
+http://localhost:<port>
 ```
 
-| Хук | Когда | Payload |
-|-----|-------|---------|
-| `ROOM_CREATED` | Комната создана | `{ room }` |
-| `ROOM_CLOSING` | Хост закрывает, клиенты ещё онлайн | `{ room, reason }` |
-| `ROOM_CLOSED` | Клиенты оповещены | `{ room, reason }` |
-| `ROOM_DESTROYED` | Финальный сигнал — чистите state | `{ roomId }` |
-| `PLAYER_JOINED` | Игрок вошёл | `{ room, socket, player }` |
-| `PLAYER_LEFT` | Игрок вышел сам | `{ room, player }` |
-| `PLAYER_KICKED` | Игрок кикнут | `{ room, player }` |
-| `GAME_START` | Хост запустил игру | `{ room, plugin }` |
-| `GAME_STOP` | Хост остановил | `{ room, plugin }` |
-| `GAME_ACTION` | Игрок сделал действие | `{ room, socket, player, action, data }` |
+Если основной провайдер недоступен, система пытается использовать следующий вариант.
 
-### Объект `room`
+Текущий порядок:
 
-- `room.id` — id комнаты
-- `room.broadcast(event, data)` — отправить событие всем в комнате
-- `room.players` — `Map<socketId, player>`
-- `room.gameActive` — игра запущена?
-- `room.activePluginName` — какой плагин активен
-
-### Клиент ↔ iframe
-
-Плагин рассылает `game:state` через `room.broadcast`. Родительское окно (хост-панель или гостевая страница) принимает событие и через `postMessage` передаёт в `<iframe>`.
-
-В `game.html`:
-
-```js
-window.parent.postMessage({ type: 'lakly:ready' }, '*');
-
-window.addEventListener('message', (e) => {
-  if (e.data?.type === 'lakly:state') render(e.data.data);
-});
-
-btn.onclick = () => {
-  window.parent.postMessage({ type: 'lakly:action', action: 'click' }, '*');
-};
+```text
+Cloudflare Quick Tunnel
+        ↓
+ngrok
+        ↓
+localhost
 ```
 
-| Тип | Направление | Payload |
-|-----|-------------|---------|
-| `lakly:ready` | iframe → parent | — |
-| `lakly:init` | parent → iframe | `{ player }` |
-| `lakly:state` | parent → iframe | `{ data }` |
-| `lakly:action` | iframe → parent | `{ action, data }` |
+Для Cloudflare Quick Tunnel не требуется заранее настраивать домен.
 
-### Установка плагина
-
-1. Соберите папку с `manifest.json`, `index.js`, `public/`.
-2. Заархивируйте в ZIP (плагин может быть в корне или в подпапке).
-3. В приложении откройте вкладку **«Игры»** → перетащите ZIP в окно.
-4. Сервер проверит: размер ≤ 10 MB, файлов ≤ 500, распакованный размер ≤ 50 MB, никаких `../` и абсолютных путей, whitelist расширений.
-
-### Конфиг плагина
-
-Если в корне есть `config.json`, в карточке плагина появится кнопка ⚙. Дефолтный конфиг копируется в пользовательский при первом сохранении и не теряется при обновлении плагина (хранится в `userData/plugin-data/<id>.json`).
+> Quick Tunnel создаёт временный публичный адрес. Это удобно для игровых комнат и демонстраций, но такой URL не является постоянным адресом приложения.
 
 ---
 
-## 🔒 Безопасность
+## 📁 Раздача локальной папки
 
-### Модель доверия
+LaklyCustom может использоваться не только для игр.
 
-- **Хост** — полностью доверенный, работает в собственном Electron-процессе.
-- **Гость** — недоверенный, общается только через Socket.IO.
-- **Плагины** — изолированы в `worker_threads` с лимитами памяти. Устанавливайте только плагины из проверенных источников.
+В режиме **«Раздать папку»** можно выбрать директорию с HTML/CSS/JS-файлами и опубликовать её через комнату.
 
-### Что защищено
+Доступны дополнительные настройки:
 
-**Валидация** (`shared/validation.js`):
-- имя игрока ≤ 24 символов
-- сообщение чата ≤ 500 символов
-- id плагина соответствует `^[a-z0-9][a-z0-9_-]{0,39}$`
-- action игры — `^[a-z0-9_:-]{1,40}$`
+* SPA fallback;
+* кэширование;
+* доступ к скрытым файлам.
 
-**Rate limiting** (`shared/rate-limit.js`):
-- создание комнат: 3/мин/IP
-- входы: 5/мин/IP
-- чат: 5/сек/сокет
-- действия игр: 60/сек/сокет
-- кики: 20/мин/сокет
-
-**Установка ZIP:**
-- размер архива ≤ 10 MB, распакованный ≤ 50 MB
-- количество файлов ≤ 500
-- защита от path traversal (`..`, абсолютные пути)
-- whitelist расширений
-
-**CORS:** Socket.IO принимает только `localhost`, `127.0.0.1`, `*.trycloudflare.com`, `*.ngrok-free.app`, `*.ngrok.io`.
-
-**postMessage:** сообщения от iframe принимаются только если `e.source === iframe.contentWindow`.
-
-**Electron:** `contextIsolation: true`, `nodeIntegration: false`, весь доступ из UI — через `contextBridge`.
-
-**Изоляция плагинов:** hooks выполняются в отдельном `worker_threads`, основной процесс не блокируется, утечка памяти в плагине не роняет ядро.
-
-### Токен комнаты
-
-Ссылка содержит `?t=<joinToken>`. Без него `player:join` отклонится. Это защищает от подключения «наугад» к случайной комнате.
+Это удобно, например, чтобы быстро показать кому-то локальный frontend без отдельного deployment.
 
 ---
 
-## ⌨️ Горячие клавиши
+## 🔌 Прокси локального приложения
 
-| Комбинация | Действие |
-|-----------|----------|
-| `Ctrl+Alt+L` | Показать / скрыть окно |
-| `Ctrl+Alt+C` | Создать комнату (даже если окно скрыто) |
+Если приложение уже запущено локально, LaklyCustom может опубликовать его порт.
 
----
+Например:
 
-## 🔧 Диагностика
+```text
+Vite
+localhost:5173
+        ↓
+LaklyCustom
+        ↓
+public URL
+```
 
-<details>
-<summary><b>Туннель не поднимается, статус «Только локально»</b></summary>
+Поддерживается WebSocket-проксирование, поэтому такой режим подходит и для development-сценариев с live reload / HMR.
 
-Проверьте, что есть интернет. Cloudflare Quick Tunnel иногда блокируется провайдером — попробуйте мобильный интернет. Смотрите логи в терминале `npm start`.
-</details>
+Можно указать:
 
-<details>
-<summary><b>Error 1033 в браузере гостя</b></summary>
-
-Это edge Cloudflare не видит ваш `cloudflared`. Обычно само лечится за 5–10 секунд. Если повторяется — переключитесь на HTTP/2 (`TUNNEL_TRANSPORT_PROTOCOL=http2`, уже включено по умолчанию).
-</details>
-
-<details>
-<summary><b>Гость не заходит по ссылке</b></summary>
-
-Проверьте, что ссылка скопирована целиком — она содержит `?t=<token>` в конце.
-</details>
-
-<details>
-<summary><b>Порт занят</b></summary>
-
-Смените в **Настройках → Локальный порт**. Применяется после перезапуска.
-</details>
-
-<details>
-<summary><b>Плагин не запускается после установки</b></summary>
-
-Откройте «Игры» — плагин должен быть в списке. Если нет, посмотрите логи в терминале: `[plugins] <id>: <причина>`.
-</details>
+* локальный порт;
+* WebSocket;
+* `changeOrigin`;
+* SSL;
+* timeout.
 
 ---
 
-## 🛠 Разработка
+# 🚀 Быстрый старт
+
+## Требования
+
+* Node.js
+* npm
+* desktop-система с поддержкой Electron
+
+## Установка
 
 ```bash
-# Установка
+git clone https://github.com/LAKLY/LaklyCustom.git
+cd LaklyCustom
 npm install
+```
 
-# Тесты
-npm test
+## Запуск
 
-# Запуск с открытыми DevTools
+```bash
+npm start
+```
+
+Для разработки:
+
+```bash
 npm run dev
 ```
 
-Тесты покрывают: валидацию, rate-limit, plugin-loader (валидация манифестов, reload, unload), proxy-security (403 для не-локальных запросов), hardening (жизненный цикл комнаты, события).
-
-### Точки расширения
-
-- **Плагин** — папка в `plugins/` с `manifest.json` + `index.js`. Хуки см. выше.
-- **Провайдер туннеля** — добавить класс с `isAvailable()` / `start(port)` / `stop()` в `core/tunnels/` и зарегистрировать в `core/tunnels/index.js`.
-- **Режим комнаты** — добавить тип в `server.js` (обработка `host:create-room`), рантайм-middleware, поля в `applyRoomModeUi` на UI.
+После запуска откроется desktop-приложение LaklyCustom.
 
 ---
 
-## 📄 Лицензия
+## 🧪 Тесты
 
-MIT — используйте, форкайте, ломайте, чините.
+Запустить тесты:
+
+```bash
+npm test
+```
+
+Watch-режим:
+
+```bash
+npm run test:watch
+```
+
+---
+
+# 🏗 Архитектура
+
+Упрощённо приложение выглядит так:
+
+```text
+┌─────────────────────────────────────┐
+│             Electron                │
+│        desktop / tray / IPC         │
+└──────────────────┬──────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────┐
+│             Core Server             │
+│                                     │
+│  Express                            │
+│  Socket.IO                          │
+│  RoomManager                        │
+│  PluginLoader                       │
+│  TunnelSupervisor                   │
+│  Proxy                              │
+└──────────────┬──────────────┬───────┘
+               │              │
+               ▼              ▼
+          ┌─────────┐    ┌───────────┐
+          │ Plugins │    │  Tunnel   │
+          │         │    │ Cloudflare│
+          │ Games   │    │ / ngrok   │
+          └────┬────┘    └───────────┘
+               │
+               ▼
+          ┌─────────┐
+          │ Browser │
+          │  Guest  │
+          └─────────┘
+```
+
+### Основные части
+
+```text
+core/
+├── server.js
+├── room.js
+├── room-manager.js
+├── plugin-loader.js
+├── plugin-host.js
+├── plugin-worker.js
+├── proxy.js
+├── tunnel-supervisor.js
+└── tunnels/
+
+electron/
+├── main
+└── preload
+
+public/
+└── guest interface
+
+ui/
+└── host interface
+
+plugins/
+└── installed games
+
+shared/
+└── events / validation / rate limiting
+```
+
+---
+
+# 🔄 Жизненный цикл комнаты
+
+Упрощённый сценарий:
+
+```text
+Создание комнаты
+       │
+       ▼
+Запуск локального сервера
+       │
+       ▼
+Запуск tunnel
+       │
+       ▼
+Получение публичного URL
+       │
+       ▼
+Создание join token
+       │
+       ▼
+┌───────────────────┐
+│
 ```
