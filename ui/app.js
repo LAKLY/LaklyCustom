@@ -1,7 +1,8 @@
+// ui/app.js
 const socket = io();
 const $ = id => document.getElementById(id);
 
-// Навигация
+// --- Навигация ---
 document.querySelectorAll('.nav-item').forEach(btn => {
   btn.onclick = () => {
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
@@ -32,23 +33,33 @@ const btnGameStop   = $('btn-game-stop');
 const dropZone      = $('drop-zone');
 const btnInstallPlugin = $('btn-install-plugin');
 
-const modeRadios    = document.querySelectorAll('input[name="room-mode"]');
-const staticPicker  = $('static-picker');
-const staticDirInput = $('static-dir');
-const btnPickDir    = $('btn-pick-dir');
+const modeRadios      = document.querySelectorAll('input[name="room-mode"]');
+const staticPicker    = $('static-picker');
+const staticDirInput  = $('static-dir');
+const btnPickDir      = $('btn-pick-dir');
+const proxyPicker     = $('proxy-picker');
+const proxyPortInput  = $('proxy-port');
+const btnCheckPort    = $('btn-check-port');
+const btnScanPorts    = $('btn-scan-ports');
+const proxyStatusEl   = $('proxy-status');
 
-const proxyPicker    = $('proxy-picker');
-const proxyPortInput = $('proxy-port');
-const btnCheckPort   = $('btn-check-port');
-const btnScanPorts   = $('btn-scan-ports');
-const proxyStatusEl  = $('proxy-status');
+const welcomeScreen   = $('welcome-screen');
+const btnWelcomeCreate = $('btn-welcome-create');
+const btnWelcomeSkip  = $('btn-welcome-skip');
+
+const advancedToggle  = $('btn-advanced-toggle');
+const advancedPanel   = $('advanced-panel');
 
 let messages = [];
 let activePluginName = null;
 let progressTimer = null;
 let lastGameState = null;
-const meAsHost = { playerId: 'host', playerName: 'Хост', playerColor: '#00F5FF' };
+const meAsHost = { playerId: 'host', playerName: 'Хост', playerColor: '#4DC5FF' };
 
+// --- Токен инициализации приложения ---
+let settings = { hasSeenWelcome: false };
+
+// ========== TOAST ==========
 function toast(text) {
   const el = $('toast');
   el.textContent = text;
@@ -57,6 +68,57 @@ function toast(text) {
   el._t = setTimeout(() => el.classList.remove('show'), 2600);
 }
 
+// ========== WELCOME LOGIC ==========
+async function checkFirstRun() {
+  if (!window.lakly?.getSettings) {
+    // В вебе (не Electron) показываем welcome, если localStorage пуст
+    const seen = localStorage.getItem('hasSeenWelcome') === '1';
+    if (!seen) {
+      welcomeScreen.hidden = false;
+    }
+    return;
+  }
+  try {
+    settings = await window.lakly.getSettings();
+    if (!settings.hasSeenWelcome) {
+      welcomeScreen.hidden = false;
+    }
+  } catch (err) {
+    console.error('[welcome]', err);
+  }
+}
+
+async function markWelcomeSeen() {
+  settings.hasSeenWelcome = true;
+  if (window.lakly?.setSettings) {
+    try {
+      await window.lakly.setSettings({ ...settings });
+    } catch (err) { console.error('[welcome:set]', err); }
+  } else {
+    localStorage.setItem('hasSeenWelcome', '1');
+  }
+}
+
+btnWelcomeCreate.onclick = async () => {
+  welcomeScreen.hidden = true;
+  await markWelcomeSeen();
+  // Сразу создаём комнату
+  btnStart.click();
+};
+
+btnWelcomeSkip.onclick = async () => {
+  welcomeScreen.hidden = true;
+  await markWelcomeSeen();
+};
+
+// ========== ADVANCED PANEL ==========
+advancedToggle.onclick = () => {
+  const isOpen = advancedPanel.dataset.open === 'true';
+  advancedPanel.dataset.open = isOpen ? 'false' : 'true';
+  advancedToggle.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+};
+
+// ========== PROGRESS HINTS ==========
 function startProgressHints() {
   const hints = ['Готовим сервер…', 'Открываем туннель…', 'Получаем адрес…', 'Проверяем связь…'];
   let i = 0;
@@ -71,6 +133,7 @@ function stopProgressHints() {
   progressTimer = null;
 }
 
+// ========== PLUGINS ==========
 function makeOption(value, label) {
   const opt = document.createElement('option');
   opt.value = value;
@@ -93,10 +156,11 @@ async function loadPlugins() {
 
     listEl.innerHTML = '';
     if (!j.plugins.length) {
-      const empty = document.createElement('div');
-      empty.className = 'empty';
-      empty.textContent = 'Плагины не найдены. Перетащите ZIP-архив в окно.';
-      listEl.append(empty);
+      listEl.innerHTML = `
+        <div class="empty-nika">
+          <img src="/assets/nika/nika-welcome.png" alt="" onerror="this.style.display='none'">
+          <p>Установите первый плагин, чтобы начать</p>
+        </div>`;
       return;
     }
     for (const p of j.plugins) {
@@ -124,7 +188,7 @@ async function loadPlugins() {
   }
 }
 
-// --- Старт ---
+// ========== КНОПКИ ==========
 btnStart.onclick = () => {
   const mode = document.querySelector('input[name="room-mode"]:checked')?.value || 'default';
 
@@ -140,8 +204,7 @@ btnStart.onclick = () => {
   if (mode === 'proxy') {
     const port = Number(proxyPortInput.value);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      toast('Введите порт от 1 до 65535');
-      return;
+      toast('Введите порт от 1 до 65535'); return;
     }
     btnStart.disabled = true;
     startProgressHints();
@@ -156,7 +219,7 @@ btnStart.onclick = () => {
 };
 
 btnStop.onclick = () => {
-  if (confirm('Закрыть комнату? Гости будут отключены.')) {
+  if (confirm('Закрыть комнату? Гости отключатся.')) {
     socket.emit('host:close-room');
   }
 };
@@ -173,7 +236,7 @@ btnJoinGuest.onclick = () => {
 
 btnCopy.onclick = () => {
   navigator.clipboard.writeText(roomUrl.value)
-    .then(() => toast('Ссылка скопирована'))
+    .then(() => toast('Скопировано'))
     .catch(() => toast('Не удалось скопировать'));
 };
 
@@ -192,7 +255,7 @@ function sendChat() {
   chatInput.value = '';
 }
 
-// --- Socket ---
+// ========== SOCKET ==========
 socket.on('host:room-created', async (data) => {
   stopProgressHints();
   statusDot.classList.add('on');
@@ -212,7 +275,7 @@ socket.on('host:room-created', async (data) => {
   gameFrame.src = 'about:blank';
 
   if (data.type === 'static') {
-    gameStatus.textContent = 'Static-режим — гости видят вашу папку';
+    gameStatus.textContent = 'Static-режим';
     btnGameStart.disabled = true;
     btnGameStop.disabled = true;
   } else if (data.type === 'proxy') {
@@ -233,9 +296,9 @@ socket.on('host:room-created', async (data) => {
 
   if (isPublic) {
     navigator.clipboard.writeText(data.publicUrl).catch(() => {});
-    toast('Ссылка скопирована — отправьте её друзьям');
+    toast('Ссылка скопирована');
   } else {
-    toast('Публичный туннель недоступен — работает только локальная сеть');
+    toast('Публичный туннель недоступен');
   }
 });
 
@@ -285,7 +348,7 @@ socket.on('disconnect', () => {
   statusText.textContent = 'Нет связи с сервером';
 });
 
-// --- Единственный обработчик message от iframe ---
+// ========== IFRAME MESSAGE ==========
 window.addEventListener('message', (e) => {
   if (!gameFrame?.contentWindow || e.source !== gameFrame.contentWindow) return;
   if (!e.data || typeof e.data !== 'object') return;
@@ -304,7 +367,7 @@ window.addEventListener('message', (e) => {
   }
 });
 
-// --- Рендер ---
+// ========== RENDER ==========
 async function refreshPlayers() {
   try {
     const r = await fetch('/api/room');
@@ -316,7 +379,11 @@ async function refreshPlayers() {
 function renderPlayers(list) {
   $('player-count').textContent = String(list.length);
   if (!list.length) {
-    playersEl.innerHTML = '<div class="empty">Пока никого. Отправьте друзьям ссылку или QR.</div>';
+    playersEl.innerHTML = `
+      <div class="empty-nika">
+        <img src="/assets/nika/nika-sleep.png" alt="" onerror="this.style.display='none'">
+        <p>Отправьте ссылку — и здесь появятся друзья</p>
+      </div>`;
     return;
   }
   playersEl.innerHTML = list.map(p => `
@@ -333,6 +400,14 @@ function renderPlayers(list) {
 }
 
 function renderChat() {
+  if (!messages.length) {
+    chatEl.innerHTML = `
+      <div class="empty-nika">
+        <img src="/assets/nika/nika-idle.png" alt="" onerror="this.style.display='none'">
+        <p>Сообщений пока нет</p>
+      </div>`;
+    return;
+  }
   chatEl.innerHTML = messages.map(m => `
     <div class="msg">
       <span class="msg-name" style="color:${m.senderColor}">${escapeHtml(m.sender)}:</span>
@@ -343,7 +418,9 @@ function renderChat() {
 }
 
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
 }
 
 function updateGameControls() {
@@ -364,7 +441,11 @@ function resetUi() {
   chatInput.disabled = true;
   roomUrl.value = '—';
   qrEl.innerHTML = '<div class="qr-empty">Нажмите «Создать комнату»</div>';
-  playersEl.innerHTML = '<div class="empty">Пока никого</div>';
+  playersEl.innerHTML = `
+    <div class="empty-nika">
+      <img src="/assets/nika/nika-sleep.png" alt="" onerror="this.style.display='none'">
+      <p>Отправьте ссылку — и здесь появятся друзья</p>
+    </div>`;
   chatEl.innerHTML = '';
   $('player-count').textContent = '0';
   messages = [];
@@ -380,10 +461,12 @@ function resetUi() {
   }
 }
 
+// ========== SETTINGS ==========
 async function loadSettings() {
   if (!window.lakly) return;
   try {
     const s = await window.lakly.getSettings();
+    settings = s;
     $('set-tunnel').value = s.tunnel || 'auto';
     $('set-ngrok-token').value = s.ngrokToken || '';
     $('set-port').value = s.port || 3000;
@@ -392,15 +475,18 @@ async function loadSettings() {
 
 $('btn-save-settings').onclick = async () => {
   if (!window.lakly) { toast('Настройки недоступны'); return; }
-  await window.lakly.setSettings({
+  const merged = {
+    ...settings,
     tunnel: $('set-tunnel').value,
     ngrokToken: $('set-ngrok-token').value,
     port: Number($('set-port').value) || 3000,
-  });
+  };
+  await window.lakly.setSettings(merged);
+  settings = merged;
   toast('Сохранено. Перезапустите приложение.');
 };
 
-// --- Переключатель режимов ---
+// ========== MODE SWITCH ==========
 modeRadios.forEach(r => {
   r.addEventListener('change', () => {
     const mode = document.querySelector('input[name="room-mode"]:checked')?.value;
@@ -418,7 +504,7 @@ btnPickDir.onclick = async () => {
   }
 };
 
-// --- Проверка порта ---
+// ========== PROXY CHECK ==========
 btnCheckPort.onclick = async () => {
   const port = Number(proxyPortInput.value);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -453,13 +539,13 @@ btnCheckPort.onclick = async () => {
 };
 
 btnScanPorts.onclick = async () => {
-  proxyStatusEl.textContent = 'Сканируем популярные порты…';
+  proxyStatusEl.textContent = 'Сканируем…';
   proxyStatusEl.className = 'proxy-status';
   try {
     const r = await fetch('/api/proxy/scan');
     const j = await r.json();
     if (!j.ports?.length) {
-      proxyStatusEl.textContent = 'Ничего не найдено. Запустите dev-сервер и попробуйте снова.';
+      proxyStatusEl.textContent = 'Ничего не найдено';
       proxyStatusEl.className = 'proxy-status err';
       return;
     }
@@ -486,7 +572,7 @@ btnScanPorts.onclick = async () => {
   }
 };
 
-// --- Drag & Drop установка плагинов ---
+// ========== DRAG & DROP ==========
 let dragCounter = 0;
 document.addEventListener('dragenter', (e) => {
   e.preventDefault();
@@ -507,17 +593,17 @@ document.addEventListener('drop', async (e) => {
   const files = e.dataTransfer.files;
   if (!files.length) return;
   const file = files[0];
-  if (!file.name.endsWith('.zip')) { toast('Нужен ZIP-архив с плагином'); return; }
+  if (!file.name.endsWith('.zip')) { toast('Нужен ZIP-архив'); return; }
 
   const path = window.lakly?.getPathForFile?.(file) || file.path;
-  if (!path) { toast('Не удалось получить путь к файлу'); return; }
+  if (!path) { toast('Не удалось получить путь'); return; }
 
   try {
     const result = await window.lakly.installPluginZip(path);
-    if (result.ok) { toast(`Плагин «${result.plugin}» установлен!`); await loadPlugins(); }
+    if (result.ok) { toast(`Плагин «${result.plugin}» установлен`); await loadPlugins(); }
     else { toast('Ошибка: ' + result.error); }
   } catch (err) {
-    toast('Ошибка установки: ' + err.message);
+    toast('Ошибка: ' + err.message);
   }
 });
 
@@ -531,13 +617,13 @@ btnInstallPlugin.onclick = () => {
     const path = window.lakly?.getPathForFile?.(file) || file.path;
     if (!path) { toast('Не удалось получить путь'); return; }
     const result = await window.lakly.installPluginZip(path);
-    if (result.ok) { toast(`Плагин «${result.plugin}» установлен!`); await loadPlugins(); }
+    if (result.ok) { toast(`Плагин «${result.plugin}» установлен`); await loadPlugins(); }
     else { toast('Ошибка: ' + result.error); }
   };
   input.click();
 };
 
-// --- Трей-события ---
+// ========== TRAY ==========
 if (window.lakly?.onTrayCloseRoom) {
   window.lakly.onTrayCloseRoom(() => {
     if (!btnStop.disabled) socket.emit('host:close-room');
@@ -549,8 +635,9 @@ if (window.lakly?.onTrayCreateRoom) {
   });
 }
 
-// --- Запуск при загрузке окна ---
-window.addEventListener('load', () => {
+// ========== STARTUP ==========
+window.addEventListener('load', async () => {
+  await checkFirstRun();
   loadSettings();
   loadPlugins();
 });

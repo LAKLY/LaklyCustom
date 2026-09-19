@@ -2,16 +2,26 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<link rel="icon" href="data:,">
 <title>LaklyCustom</title>
 <link rel="stylesheet" href="/host/style.css">
 <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
+
+<!-- Welcome (первый запуск) -->
+<div id="welcome-screen" class="welcome-screen" hidden>
+  <img class="welcome-mascot" src="/host/../assets/nika/nika-welcome.png"
+       alt="Ника" onerror="this.style.display='none'">
+  <h1 class="welcome-title">LaklyCustom</h1>
+  <p class="welcome-sub">Создайте комнату — друзья подключатся по ссылке за 5 секунд.</p>
+  <button id="btn-welcome-create" class="btn-cta btn-cta-large">Создать первую комнату</button>
+  <button id="btn-welcome-skip" class="welcome-skip">Настроить позже</button>
+</div>
+
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
-      <span class="logo">◆</span>
+      <img src="/host/../assets/icon/icon-64.png" alt="LaklyCustom" onerror="this.style.display='none'">
       <span class="brand-name">LaklyCustom</span>
     </div>
     <nav class="nav">
@@ -32,80 +42,90 @@
       <header class="view-header">
         <h1>Комната</h1>
         <div class="actions">
-          <button id="btn-start" class="btn btn-primary">Создать комнату</button>
+          <button id="btn-start" class="btn-cta">Создать комнату</button>
           <button id="btn-join-guest" class="btn" disabled>Зайти как гость</button>
           <button id="btn-stop" class="btn btn-danger" disabled>Закрыть</button>
         </div>
       </header>
 
-      <div class="card">
-        <h2>Режим комнаты</h2>
-        <div class="mode-switch">
-          <label class="mode-option">
-            <input type="radio" name="room-mode" value="default" checked>
-            <span>Плагин / чат</span>
-          </label>
-          <label class="mode-option">
-            <input type="radio" name="room-mode" value="static">
-            <span>Раздать папку (Static)</span>
-          </label>
-          <label class="mode-option">
-            <input type="radio" name="room-mode" value="proxy">
-            <span>Прокси порт (Dev)</span>
-          </label>
-        </div>
-
-        <div id="static-picker" style="display:none; margin-top:12px;">
-          <label>Папка с HTML</label>
-          <div class="share-row">
-            <input id="static-dir" readonly value="Папка не выбрана">
-            <button id="btn-pick-dir" class="btn btn-small">Выбрать…</button>
+      <!-- Расширенные режимы (свёрнуты) -->
+      <div class="card level-2">
+        <button id="btn-advanced-toggle" class="advanced-toggle" aria-expanded="false">
+          <span class="arrow">▶</span>
+          <span>Расширенные режимы</span>
+        </button>
+        <div class="advanced-panel" id="advanced-panel" data-open="false">
+          <div class="mode-switch">
+            <label class="mode-option">
+              <input type="radio" name="room-mode" value="default" checked>
+              <span>Плагин / чат</span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="room-mode" value="static">
+              <span>Раздать папку (Static)</span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="room-mode" value="proxy">
+              <span>Прокси порт (Dev)</span>
+            </label>
           </div>
-          <p class="hint">index.html будет отдан гостям как главная страница. Остальные ресурсы (CSS, JS, картинки) — из той же папки.</p>
-        </div>
 
-        <div id="proxy-picker" style="display:none; margin-top:12px;">
-          <label>Порт локального приложения</label>
-          <div class="share-row">
-            <input id="proxy-port" type="number" min="1" max="65535" placeholder="5173" value="5173">
-            <button id="btn-check-port" class="btn btn-small">Проверить</button>
-            <button id="btn-scan-ports" class="btn btn-small">Найти запущенные</button>
+          <div id="static-picker" style="display:none; margin-top:14px;">
+            <label>Папка с HTML</label>
+            <div class="share-row">
+              <input id="static-dir" readonly value="Папка не выбрана">
+              <button id="btn-pick-dir" class="btn btn-small">Выбрать…</button>
+            </div>
+            <p class="hint">index.html станет главной страницей. Остальные ресурсы — из той же папки.</p>
           </div>
-          <div id="proxy-status" class="proxy-status"></div>
-          <p class="hint">
-            Туннель будет проксировать <code>127.0.0.1:PORT</code>.
-            Vite — обычно 5173, Next — 3000/3001, Angular — 4200, Live Server — 5500, Django — 8000.
-          </p>
+
+          <div id="proxy-picker" style="display:none; margin-top:14px;">
+            <label>Порт локального приложения</label>
+            <div class="share-row">
+              <input id="proxy-port" type="number" min="1" max="65535" placeholder="5173" value="5173">
+              <button id="btn-check-port" class="btn btn-small">Проверить</button>
+              <button id="btn-scan-ports" class="btn btn-small">Найти запущенные</button>
+            </div>
+            <div id="proxy-status" class="proxy-status"></div>
+            <p class="hint">
+              Vite — 5173 · Next — 3000/3001 · Angular — 4200 · Live Server — 5500 · Django — 8000.
+            </p>
+          </div>
         </div>
       </div>
 
-      <div class="room-layout" id="room-layout">
+      <div class="room-layout">
         <div class="room-left">
-          <div class="card">
+          <div class="card level-1">
             <h2>Подключение</h2>
-            <div class="qr" id="qr"><div class="qr-empty">Нажмите «Создать комнату»</div></div>
+            <div class="qr" id="qr">
+              <div class="qr-empty">Нажмите «Создать комнату»</div>
+            </div>
             <div class="share-row">
               <input id="room-url" readonly value="—">
               <button id="btn-copy" class="btn btn-small" disabled>Копировать</button>
             </div>
           </div>
 
-          <div class="card">
+          <div class="card level-2">
             <h2>Игроки <span id="player-count" class="badge">0</span></h2>
             <div id="players" class="players">
-              <div class="empty">Пока никого</div>
+              <div class="empty-nika">
+                <img src="/host/../assets/nika/nika-sleep.png" alt="" onerror="this.style.display='none'">
+                <p>Отправьте ссылку — и здесь появятся друзья</p>
+              </div>
             </div>
           </div>
         </div>
 
         <div class="room-right">
-          <div class="card game-card">
+          <div class="card level-2 game-card">
             <h2>Игра</h2>
             <div class="game-controls">
               <select id="plugin-select">
                 <option value="">— Без плагина (только чат) —</option>
               </select>
-              <button id="btn-game-start" class="btn btn-primary" disabled>Запустить</button>
+              <button id="btn-game-start" class="btn-cta" disabled>Запустить</button>
               <button id="btn-game-stop" class="btn btn-danger" disabled>Остановить</button>
               <span id="game-status" class="game-status">Игра не запущена</span>
             </div>
@@ -114,12 +134,17 @@
             </div>
           </div>
 
-          <div class="card chat-card">
+          <div class="card level-2 chat-card">
             <h2>Чат</h2>
-            <div id="chat" class="chat"></div>
+            <div id="chat" class="chat">
+              <div class="empty-nika">
+                <img src="/host/../assets/nika/nika-idle.png" alt="" onerror="this.style.display='none'">
+                <p>Сообщений пока нет</p>
+              </div>
+            </div>
             <div class="chat-input">
               <input id="chat-input" placeholder="Сообщение..." disabled>
-              <button id="btn-send" class="btn btn-primary" disabled>→</button>
+              <button id="btn-send" class="btn-cta" disabled>→</button>
             </div>
           </div>
         </div>
@@ -130,16 +155,19 @@
     <section class="view" data-view="plugins">
       <header class="view-header">
         <h1>Плагины</h1>
-        <button id="btn-install-plugin" class="btn btn-primary">Установить плагин</button>
+        <button id="btn-install-plugin" class="btn-cta">Установить плагин</button>
       </header>
-      <div class="card">
+      <div class="card level-2">
         <div class="drop-zone" id="drop-zone">
           <div class="drop-icon">📦</div>
           <p>Перетащите ZIP-архив с плагином сюда</p>
           <p class="hint">или нажмите «Установить плагин» и выберите файл</p>
         </div>
         <div id="plugins-list" class="plugins-list">
-          <div class="empty">Загрузка…</div>
+          <div class="empty-nika">
+            <img src="/host/../assets/nika/nika-welcome.png" alt="" onerror="this.style.display='none'">
+            <p>Установите первый плагин, чтобы начать</p>
+          </div>
         </div>
       </div>
     </section>
@@ -147,7 +175,7 @@
     <!-- Настройки -->
     <section class="view" data-view="settings">
       <header class="view-header"><h1>Настройки</h1></header>
-      <div class="card">
+      <div class="card level-2">
         <h2>Туннель</h2>
         <label>Провайдер</label>
         <select id="set-tunnel">
@@ -158,10 +186,10 @@
         </select>
         <label>ngrok authtoken</label>
         <input id="set-ngrok-token" placeholder="Токен с dashboard.ngrok.com">
-        <button id="btn-save-settings" class="btn btn-primary">Сохранить</button>
+        <button id="btn-save-settings" class="btn-cta">Сохранить</button>
         <p class="hint">По умолчанию — Cloudflare Quick Tunnel, без регистрации и токена.</p>
       </div>
-      <div class="card">
+      <div class="card level-2">
         <h2>Порт</h2>
         <label>Локальный порт сервера</label>
         <input id="set-port" type="number" value="3000">
@@ -172,12 +200,16 @@
     <!-- О программе -->
     <section class="view" data-view="about">
       <header class="view-header"><h1>О программе</h1></header>
-      <div class="card">
-        <h2>LaklyCustom 0.8.0</h2>
-        <p>Plugin-driven платформа для локальных комнат.</p>
-        <p>Режимы: чат с плагинами, статика из папки, проксирование локального порта.</p>
-        <p>Публичная ссылка создаётся через Cloudflare Quick Tunnel — без токена.</p>
-        <p style="margin-top:12px;color:var(--muted);font-size:12px;">
+      <div class="card level-2" style="text-align:center;">
+        <img src="/host/../assets/nika/nika-idle.png" alt="Ника"
+             style="width:96px;height:96px;image-rendering:pixelated;margin:8px 0 12px;"
+             onerror="this.style.display='none'">
+        <h2 style="justify-content:center;">LaklyCustom 1.0</h2>
+        <p style="color:var(--text-secondary);line-height:1.6;margin-top:6px;">
+          Утилита для локального запуска комнат.<br>
+          Режимы: чат с плагинами, статика из папки, проксирование локального порта.
+        </p>
+        <p style="color:var(--text-muted);font-size:12px;margin-top:16px;">
           Приложение продолжает работать в трее, даже когда окно закрыто.
         </p>
       </div>

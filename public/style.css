@@ -1,9 +1,46 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
-  --bg: #0A0E27; --panel: #0F1430; --panel-2: #141A3A;
-  --border: rgba(0, 245, 255, 0.14);
-  --cyan: #00F5FF; --pink: #FF006E;
-  --text: #E6EAF5; --muted: #8A93B5;
+  /* Фоны */
+  --bg-deep: #0a0a0f;
+  --bg-base: #12101a;
+  --bg-elevated: #1a1522;
+  --bg-overlay: #1e1828;
+
+  /* Границы */
+  --stroke-subtle: #222836;
+  --stroke-strong: #2a1f2a;
+  --stroke-accent: rgba(155, 29, 44, 0.3);
+
+  /* Текст */
+  --text-primary: #e0e0f0;
+  --text-secondary: #b0b0c0;
+  --text-muted: #8a8090;
+
+  /* Акценты */
+  --accent-primary: #4DC5FF;
+  --accent-primary-hover: #6FD3FF;
+  --accent-bordeaux: #9b1d2c;
+  --accent-bordeaux-hover: #b82e3f;
+  --accent-bordeaux-light: #e06c7e;
+  --accent-success: #3FCF8E;
+  --accent-warning: #F5B744;
+  --accent-danger: #c1273b;
+  --accent-info: #9B8CFF;
+
+  /* Радиусы */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  /* Анимации */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --duration-fast: 100ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+
+  /* Типографика */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
 }
 html, body { height: 100%; }
 body {
@@ -90,3 +127,15 @@ body {
 ::-webkit-scrollbar-thumb { background: rgba(0, 245, 255, 0.15); border-radius: 3px; }
 
 .game-block { margin-bottom: 16px; }
+
+/* Алиасы для обратной совместимости */
+:root {
+  --bg: var(--bg-deep);
+  --panel: var(--bg-base);
+  --panel-2: var(--bg-elevated);
+  --border: var(--stroke-subtle);
+  --cyan: var(--accent-primary);
+  --pink: var(--accent-bordeaux);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+}

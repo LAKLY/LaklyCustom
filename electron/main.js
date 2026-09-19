@@ -36,22 +36,40 @@ const DEFAULT_SETTINGS = {
   tunnel: 'auto',
   port: 3000,
   ngrokToken: '',
+  hasSeenWelcome: false,
   allowedStaticDirs: [],
 };
 
+// ─── Настройки ────────────────────────────────────────────────
 async function readSettings() {
-  try { return { ...DEFAULT_SETTINGS, ...JSON.parse(await fs.readFile(settingsPath, 'utf8')) }; }
-  catch { return DEFAULT_SETTINGS; }
+  try {
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(await fs.readFile(settingsPath, 'utf8')) };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
 }
+
 async function writeSettings(data) {
   await fs.mkdir(path.dirname(settingsPath), { recursive: true });
   await fs.writeFile(settingsPath, JSON.stringify(data, null, 2));
   return true;
 }
-ipcMain.handle('settings:get', readSettings);
-ipcMain.handle('settings:set', (_e, data) => writeSettings(data));
 
-// --- Установка плагина из ZIP ---
+ipcMain.handle('settings:get', readSettings);
+ipcMain.handle('settings:set', async (_e, data) => {
+  // merged: сохраняем и то, что передано с фронта, и локальные поля main-процесса
+  const current = await readSettings();
+  const merged = { ...current, ...data };
+
+  // if renderer не знает про allowedStaticDirs — не теряем его
+  if (!Array.isArray(data.allowedStaticDirs) && Array.isArray(current.allowedStaticDirs)) {
+    merged.allowedStaticDirs = current.allowedStaticDirs;
+  }
+
+  return writeSettings(merged);
+});
+
+// ─── Установка плагина из ZIP ─────────────────────────────────
 ipcMain.handle('plugin:install-zip', async (_e, zipPath) => {
   if (!srv) return { ok: false, error: 'Сервер не запущен' };
   try {
@@ -62,7 +80,7 @@ ipcMain.handle('plugin:install-zip', async (_e, zipPath) => {
   }
 });
 
-// --- Выбор папки для static-комнаты (со занесением в whitelist) ---
+// ─── Выбор папки для static-комнаты (с занесением в whitelist) ─
 ipcMain.handle('dialog:pick-directory', async () => {
   const result = await dialog.showOpenDialog(win, {
     title: 'Выберите папку с HTML',
@@ -73,7 +91,7 @@ ipcMain.handle('dialog:pick-directory', async () => {
   const dir = result.filePaths[0];
   allowedStaticDirs.add(dir);
 
-  // persist — чтобы после перезапуска список сохранился
+  // persist — чтобы whitelist сохранился после перезапуска
   try {
     const s = await readSettings();
     s.allowedStaticDirs = [...allowedStaticDirs];
@@ -87,25 +105,59 @@ ipcMain.handle('dialog:pick-directory', async () => {
 
 ipcMain.handle('shell:open-path', async (_e, p) => {
   if (typeof p !== 'string') return false;
-  try { await shell.openPath(p); return true; } catch { return false; }
+  try {
+    await shell.openPath(p);
+    return true;
+  } catch {
+    return false;
+  }
 });
 
-function loadTrayIcon() {
-  for (const name of ['tray.png', 'icon.png', 'icon.ico']) {
-    try {
-      const img = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', name));
-      if (!img.isEmpty()) return img;
-    } catch {}
-  }
+// ─── Иконки ───────────────────────────────────────────────────
+function loadIcon(relativePath) {
+  try {
+    const img = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', relativePath));
+    if (!img.isEmpty()) return img;
+  } catch {}
   return nativeImage.createEmpty();
 }
 
+function loadTrayIcon(state = 'idle') {
+  const map = {
+    idle:   'tray/tray-idle.png',
+    active: 'tray/tray-active.png',
+    busy:   'tray/tray-busy.png',
+  };
+  const icon = loadIcon(map[state] || map.idle);
+  // Fallback: если ассета нет — используем иконку приложения
+  if (icon.isEmpty()) return loadIcon('icon/icon-64.png');
+  return icon;
+}
+
+function loadWindowIcon() {
+  return loadIcon('icon/icon-64.png');
+}
+
+// ─── Трей ─────────────────────────────────────────────────────
 function refreshTray() {
   if (!tray) return;
+
+  // Состояние иконки:
+  // idle   — комната не запущена
+  // active — комната активна, но 0 игроков
+  // busy   — есть игроки
+  const trayState = !roomActive ? 'idle'
+    : playerCount > 0 ? 'busy'
+    : 'active';
+
+  const icon = loadTrayIcon(trayState);
+  if (!icon.isEmpty()) tray.setImage(icon);
+
   const status = roomActive
     ? `Комната активна · игроков: ${playerCount}`
     : 'Комната не запущена';
   tray.setToolTip(`LaklyCustom\n${status}`);
+
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Открыть окно', click: () => win?.show() },
     { type: 'separator' },
@@ -122,18 +174,25 @@ function refreshTray() {
 }
 
 function createTray() {
-  tray = new Tray(loadTrayIcon());
+  tray = new Tray(loadTrayIcon('idle'));
   refreshTray();
   tray.on('click', () => win?.isVisible() ? win.hide() : win?.show());
 }
 
+// ─── Уведомления ──────────────────────────────────────────────
 function notify(title, body) {
   if (!Notification.isSupported()) return;
-  const n = new Notification({ title, body, icon: loadTrayIcon() });
+  const icon = loadWindowIcon();
+  const n = new Notification({
+    title,
+    body,
+    icon: icon.isEmpty() ? undefined : icon,
+  });
   n.on('click', () => win?.show());
   n.show();
 }
 
+// ─── Хуки сервера ─────────────────────────────────────────────
 const serverHooks = {
   onPlayerJoin(player) {
     playerCount++;
@@ -145,14 +204,23 @@ const serverHooks = {
     refreshTray();
     if (player?.name) notify('Игрок вышел', `${player.name} покинул комнату`);
   },
-  onRoomCreated() { roomActive = true; playerCount = 0; refreshTray(); },
-  onRoomClosed() { roomActive = false; playerCount = 0; refreshTray(); },
+  onRoomCreated() {
+    roomActive = true;
+    playerCount = 0;
+    refreshTray();
+  },
+  onRoomClosed() {
+    roomActive = false;
+    playerCount = 0;
+    refreshTray();
+  },
 };
 
+// ─── Bootstrap ────────────────────────────────────────────────
 async function bootstrap() {
   const settings = await readSettings();
 
-  // Загружаем сохранённый whitelist
+  // Загружаем сохранённый whitelist static-папок
   for (const dir of (settings.allowedStaticDirs || [])) {
     if (typeof dir === 'string') allowedStaticDirs.add(dir);
   }
@@ -168,11 +236,14 @@ async function bootstrap() {
   console.log('[electron] server on port', srv.port);
 
   win = new BrowserWindow({
-    width: 1280, height: 820, minWidth: 960, minHeight: 640,
+    width: 1280,
+    height: 820,
+    minWidth: 960,
+    minHeight: 640,
     title: 'LaklyCustom',
-    backgroundColor: '#0A0E27',
+    backgroundColor: '#0a0a0f',
     autoHideMenuBar: true,
-    icon: loadTrayIcon(),
+    icon: loadWindowIcon(),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -191,16 +262,23 @@ async function bootstrap() {
     if (!app.isQuitting) {
       e.preventDefault();
       win.hide();
-      if (roomActive) notify('LaklyCustom', 'Комната продолжает работать в трее');
+      if (roomActive) {
+        notify('LaklyCustom', 'Комната продолжает работать в трее');
+      }
     }
   });
 
   win.on('closed', () => { win = null; });
+
   createTray();
 }
 
+// ─── Жизненный цикл приложения ────────────────────────────────
 app.whenReady().then(bootstrap);
-app.on('window-all-closed', () => { /* живём в трее */ });
+
+app.on('window-all-closed', () => {
+  // Живём в трее — не выходим
+});
 
 let quitting = false;
 app.on('before-quit', async (e) => {
@@ -208,11 +286,16 @@ app.on('before-quit', async (e) => {
   e.preventDefault();
   quitting = true;
   app.isQuitting = true;
-  try { await srv?.close?.(); } catch {}
+  try {
+    await srv?.close?.();
+  } catch {}
   app.quit();
 });
 
 app.on('activate', () => {
-  if (win) { win.show(); return; }
+  if (win) {
+    win.show();
+    return;
+  }
   if (BrowserWindow.getAllWindows().length === 0) bootstrap();
 });

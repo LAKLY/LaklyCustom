@@ -154,6 +154,7 @@ export async function startServer({
 
   // UI хоста и статика плагинов — идут до proxy/static middleware
   app.use('/host', express.static(path.join(ROOT, 'ui'), noCache));
+  app.use('/assets', express.static(path.join(ROOT, 'assets'), noCache));
   for (const plugin of pluginLoader.plugins.values()) {
     app.use(`/plugins/${plugin.id}`, express.static(plugin.publicDir, noCache));
   }
