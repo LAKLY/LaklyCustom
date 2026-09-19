@@ -13,8 +13,7 @@ export class Room {
     this.hostSocketId = hostSocket.id;
 
     // joinToken проверяется в player:join из URL-параметра ?t=.
-    // hostToken не используется: host-команды защищены socket.id + WSS,
-    // второй фактор даёт только видимость безопасности без реальной пользы.
+    // hostToken не используется: host-команды защищены socket.id + WSS.
     this.joinToken = uuidv4();
 
     this.players = new Map();
@@ -104,7 +103,6 @@ export class Room {
 
   async startGame(pluginName) {
     // Игры разрешены только в default/plugin-комнатах.
-    // В static/proxy крутится чужое приложение, там наши плагины неуместны.
     if (this.type !== 'default' && this.type !== 'plugin') return false;
 
     const plugin = this.pluginLoader.get(pluginName);
@@ -157,5 +155,9 @@ export class Room {
 
     await this.pluginLoader.emit(EVENTS.ROOM_CLOSED, { room: this, reason });
     await this.pluginLoader.emit(EVENTS.ROOM_DESTROYED, { roomId: this.id });
+
+    // Все plugin-worker'ы забывают состояние этой комнаты.
+    // `?.` — для тестовых моков без метода cleanupRoom.
+    this.pluginLoader.cleanupRoom?.(this.id);
   }
 }

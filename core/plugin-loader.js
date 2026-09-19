@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import unzipper from 'unzipper';
+import { PluginHost } from './plugin-host.js';
 import { EVENTS } from '../shared/events.js';
 
 const MAX_ZIP_SIZE = 10 * 1024 * 1024;
@@ -20,11 +21,23 @@ const ALLOWED_EXT = new Set([
 export class PluginLoader {
   constructor(pluginsDir) {
     this.pluginsDir = pluginsDir;
-    this.plugins = new Map();
-    this.handlers = new Map();
+    this.plugins = new Map();   // id -> record
+    this.handlers = new Map();  // eventName -> [{ pluginName }]
+    this.io = null;
+    this.roomManager = null;
+  }
+
+  /** Вызывается после создания RoomManager — тогда есть io */
+  attachServer({ io, roomManager }) {
+    this.io = io;
+    this.roomManager = roomManager;
   }
 
   async load() {
+    // Останавливаем все текущие workers
+    for (const [, rec] of this.plugins) {
+      try { await rec.host?.unload?.(); } catch {}
+    }
     this.plugins.clear();
     this.handlers.clear();
 
@@ -46,12 +59,18 @@ export class PluginLoader {
 
   async reload() { await this.load(); }
 
-  async unload(pluginName) {
-    const plugin = this.plugins.get(pluginName);
-    if (!plugin) return;
-    try { await plugin.entry.onUnload?.(); }
-    catch (err) { console.error(`[plugins] ${pluginName} onUnload:`, err.message); }
+  async unloadAll() {
+    for (const [id, rec] of this.plugins) {
+      try { await rec.host?.unload?.(); } catch {}
+      this.plugins.delete(id);
+    }
+    this.handlers.clear();
+  }
 
+  async unload(pluginName) {
+    const rec = this.plugins.get(pluginName);
+    if (!rec) return;
+    try { await rec.host?.unload?.(); } catch {}
     this.plugins.delete(pluginName);
 
     for (const [event, list] of this.handlers) {
@@ -66,69 +85,104 @@ export class PluginLoader {
     const dir = path.join(this.pluginsDir, dirName);
     const rawManifest = await this._readManifest(dir);
     const manifest = this._validateManifest(rawManifest, dirName);
-
     if (!manifest) {
       console.warn(`[plugins] ${dirName}: невалидный manifest, пропускаем`);
       return;
     }
 
     const entryPath = path.join(dir, manifest.entry);
-
     try {
-      // Проверяем, что entry существует до импорта
       await fs.access(entryPath, fs.constants.R_OK);
+    } catch {
+      console.warn(`[plugins] ${dirName}: не найден ${manifest.entry}`);
+      return;
+    }
 
-      const url = pathToFileURL(entryPath).href;
-      const mod = await import(url);
-      const plugin = mod.default;
-      if (!plugin || typeof plugin !== 'object') {
-        console.warn(`[plugins] ${dirName}: нет default export`);
-        return;
-      }
+    const entryUrl = pathToFileURL(entryPath).href;
 
-      const record = {
-        id: manifest.id,
-        name: manifest.name,
-        version: manifest.version,
-        description: manifest.description,
-        apiVersion: manifest.apiVersion,
-        entry: plugin,
-        dir,
-        publicDir: path.join(dir, 'public'),
-        manifest,
-      };
+    const host = new PluginHost({
+      io: this.io,
+      getRoom: (roomId) => this.roomManager?.getRoom(roomId) || null,
+      getRoomState: (roomId) => this._buildRoomState(roomId),
+    });
 
-      // Транзакционно: сначала плагин, потом hooks, потом событие
-      this._registerHooks(manifest.id, plugin);
-      this.plugins.set(manifest.id, record);
-      console.log(`[plugins] Загружен: ${manifest.id} v${manifest.version}`);
-      await this.emit(EVENTS.PLUGIN_LOADED, { name: manifest.id });
+    let loaded;
+    try {
+      loaded = await host.start(entryUrl);
     } catch (err) {
-      // Откат регистрации при падении
-      this.plugins.delete(manifest.id);
-      for (const [event, list] of this.handlers) {
-        const filtered = list.filter(h => h.pluginName !== manifest.id);
-        if (filtered.length === 0) this.handlers.delete(event);
-        else this.handlers.set(event, filtered);
-      }
-      console.error(`[plugins] Ошибка ${dirName}:`, err.message);
+      console.error(`[plugins] ${dirName}: ${err.message}`);
+      return;
+    }
+
+    const record = {
+      id: manifest.id,
+      name: loaded.name || manifest.name,
+      version: loaded.version || manifest.version,
+      description: loaded.description || manifest.description,
+      apiVersion: manifest.apiVersion,
+      host,
+      dir,
+      publicDir: path.join(dir, 'public'),
+      manifest,
+    };
+
+    this.plugins.set(manifest.id, record);
+    this._registerHooks(manifest.id, loaded.hookNames || []);
+
+    console.log(`[plugins] Загружен: ${manifest.id} v${record.version} (sandboxed)`);
+    await this.emit(EVENTS.PLUGIN_LOADED, { name: manifest.id });
+  }
+
+  _registerHooks(pluginName, hookNames) {
+    for (const event of hookNames) {
+      if (!this.handlers.has(event)) this.handlers.set(event, []);
+      this.handlers.get(event).push({ pluginName });
     }
   }
 
-  _registerHooks(pluginName, plugin) {
-    if (!plugin.hooks || typeof plugin.hooks !== 'object') return;
-    for (const [event, handler] of Object.entries(plugin.hooks)) {
-      if (typeof handler !== 'function') continue;
-      if (!this.handlers.has(event)) this.handlers.set(event, []);
-      this.handlers.get(event).push({ pluginName, handler });
+  _buildRoomState(roomId) {
+    const room = this.roomManager?.getRoom(roomId);
+    if (!room) return null;
+
+    const players = [];
+    for (const [socketId, p] of room.players) {
+      players.push({
+        id: p.id,
+        _socketId: socketId,
+        name: p.name,
+        color: p.color,
+        isHost: p.isHost,
+      });
+    }
+    return {
+      players,
+      gameActive: !!room.gameActive,
+      activePluginName: room.activePluginName || null,
+      hostSocketId: room.hostSocketId || null,
+    };
+  }
+
+  cleanupRoom(roomId) {
+    for (const [, rec] of this.plugins) {
+      rec.host?.cleanupRoom?.(roomId);
     }
   }
 
   async emit(event, payload) {
     const list = this.handlers.get(event) || [];
-    for (const { pluginName, handler } of list) {
-      try { await handler(payload); }
-      catch (err) { console.error(`[plugins] ${pluginName} → ${event}:`, err.message); }
+    for (const { pluginName } of list) {
+      const rec = this.plugins.get(pluginName);
+      if (!rec?.host) continue;
+
+      // Обновляем состояние комнаты в worker'е до вызова hook
+      const roomId = payload?.room?.id || payload?.roomId;
+      if (roomId) rec.host.updateRoomState(roomId);
+
+      try {
+        await rec.host.invoke(event, payload);
+      } catch (err) {
+        console.error(`[plugins] ${pluginName} → ${event}:`, err.message);
+      }
     }
   }
 
@@ -144,7 +198,7 @@ export class PluginLoader {
     }));
   }
 
-  // --- Установка из ZIP (атомарная) ---
+  // --- Установка из ZIP (без изменений) ---
 
   async installFromZip(zipPath) {
     const stat = await fs.stat(zipPath);
@@ -169,7 +223,6 @@ export class PluginLoader {
       const manifest = this._validateManifest(rawManifest, path.basename(pluginRoot));
       if (!manifest) throw new Error('Невалидный manifest.json');
 
-      // Проверяем, что entry существует
       const entryPath = path.join(pluginRoot, manifest.entry);
       try {
         await fs.access(entryPath, fs.constants.R_OK);
@@ -179,23 +232,19 @@ export class PluginLoader {
 
       finalDir = path.join(this.pluginsDir, manifest.id);
 
-      // Бэкап существующего
       try {
         await fs.access(finalDir);
         backupDir = path.join(this.pluginsDir, `_backup_${manifest.id}_${ts}`);
         await fs.rename(finalDir, backupDir);
       } catch { /* не было старого */ }
 
-      // Переносим новый плагин
       if (pluginRoot === tmpDir) {
-        // плагин лежал в корне архива — переименовываем сам tmpDir
         await fs.rename(tmpDir, finalDir);
       } else {
         await fs.rename(pluginRoot, finalDir);
         await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
       }
 
-      // Успех — удаляем бэкап
       if (backupDir) {
         await fs.rm(backupDir, { recursive: true, force: true }).catch(() => {});
       }
@@ -203,7 +252,6 @@ export class PluginLoader {
       await this.load();
       return manifest.id;
     } catch (err) {
-      // Откат: возвращаем backup на место
       try {
         if (backupDir && finalDir) {
           await fs.rm(finalDir, { recursive: true, force: true }).catch(() => {});
@@ -223,16 +271,13 @@ export class PluginLoader {
 
     for (const entry of directory.files) {
       const name = entry.path;
-
       if (name.includes('..') || path.isAbsolute(name)) {
         throw new Error(`Подозрительный путь в архиве: ${name}`);
       }
-
       const resolved = path.resolve(destDir, name);
       if (!resolved.startsWith(root + path.sep) && resolved !== root) {
         throw new Error(`Path traversal: ${name}`);
       }
-
       if (entry.type === 'File') {
         const ext = path.extname(name).toLowerCase();
         if (ext && !ALLOWED_EXT.has(ext)) {
@@ -242,7 +287,6 @@ export class PluginLoader {
         if (fileCount > MAX_FILES) throw new Error('Слишком много файлов');
         totalSize += entry.uncompressedSize || 0;
         if (totalSize > MAX_EXTRACTED_SIZE) throw new Error('Слишком большой распакованный размер');
-
         await fs.mkdir(path.dirname(resolved), { recursive: true });
         const content = await entry.buffer();
         await fs.writeFile(resolved, content);
@@ -274,25 +318,14 @@ export class PluginLoader {
     } catch { return null; }
   }
 
-  /**
-   * Валидирует manifest строго. Возвращает объект с полями { id, name, version,
-   * description, apiVersion, entry } или null, если manifest невалиден.
-   */
   _validateManifest(raw, fallbackId) {
     if (!raw || typeof raw !== 'object') {
-      // Legacy fallback: плагины без manifest.json.
-      // Работает, но с предупреждением. В 0.9 станет opt-in через флаг,
-      // в 1.0 — обязательный manifest.
       const id = this._sanitizeId(fallbackId);
       if (!id) return null;
-      console.warn(`[plugins] ${fallbackId}: нет manifest.json — legacy режим. Добавьте manifest для совместимости с будущими версиями.`);
+      console.warn(`[plugins] ${fallbackId}: нет manifest.json — legacy режим`);
       return {
-        id,
-        name: id,
-        version: '0.0.0',
-        description: '',
-        apiVersion: SUPPORTED_API_VERSION,
-        entry: 'index.js',
+        id, name: id, version: '0.0.0',
+        description: '', apiVersion: SUPPORTED_API_VERSION, entry: 'index.js',
       };
     }
 
@@ -314,20 +347,15 @@ export class PluginLoader {
       ? raw.description.slice(0, 200)
       : '';
 
-    // entry: если поле указано — оно должно быть валидным, иначе отклоняем манифест.
-    // Если поля нет — используем дефолт 'index.js' (для legacy-плагинов).
     let entry = 'index.js';
     if (raw.entry !== undefined) {
-    entry = this._validateEntry(raw.entry);
-    if (!entry) return null;
+      entry = this._validateEntry(raw.entry);
+      if (!entry) return null;
     }
 
     return { id, name, version, description, apiVersion, entry };
   }
 
-  /**
-   * entry должен быть безопасным относительным путём к .js/.mjs файлу.
-   */
   _validateEntry(entry) {
     if (typeof entry !== 'string' || !entry) return null;
     if (path.isAbsolute(entry)) return null;

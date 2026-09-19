@@ -61,9 +61,11 @@ export async function startServer({
   app.use(express.json({ limit: '16kb' }));
 
   const pluginLoader = new PluginLoader(path.join(ROOT, 'plugins'));
-  await pluginLoader.load();
-
   const roomManager = new RoomManager(io, pluginLoader);
+  // Сервер и менеджер комнат нужны loader'у до первого load():
+  // без них worker'ы не смогут ничего broadcast'ить.
+  pluginLoader.attachServer({ io, roomManager });
+  await pluginLoader.load();
   const limiter = new RateLimiter();
   let tunnelInstance = null;
   let publicUrl = null;
@@ -381,6 +383,7 @@ export async function startServer({
       clearInterval(pruneTimer);
       if (tunnelInstance) await closeTunnel(tunnelInstance);
       for (const room of roomManager.rooms.values()) await room.close('shutdown');
+      await pluginLoader.unloadAll();
       await new Promise(res => httpServer.close(() => res()));
     },
   };
