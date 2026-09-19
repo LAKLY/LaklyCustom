@@ -440,17 +440,18 @@ socket.on('host:room-url-changed', async ({ publicUrl, provider }) => {
   toast('Ссылка комнаты обновлена');
 });
 
-// Статус туннеля для индикации в сайдбаре.
 socket.on('host:tunnel-state', ({ state }) => {
   if (!roomActiveFlag) return;
   switch (state) {
     case 'offline':
       statusDot.classList.remove('on');
       statusText.textContent = 'Нет интернета';
+      showNika('alert', 'Интернет пропал. Ждём восстановления…', 0);
       break;
     case 'local-down':
       statusDot.classList.remove('on');
       statusText.textContent = 'Локальный сервер недоступен';
+      showNika('alert', 'Локальный сервер не отвечает', 6000);
       break;
     case 'unhealthy':
       statusDot.classList.remove('on');
@@ -459,11 +460,18 @@ socket.on('host:tunnel-state', ({ state }) => {
     case 'restarting':
       statusDot.classList.remove('on');
       statusText.textContent = 'Пересоздание туннеля…';
+      showNika('working', 'Пересоздаём туннель…', 0);
+      break;
+    case 'warming':
+      statusDot.classList.remove('on');
+      statusText.textContent = 'Прогреваем туннель…';
       break;
     case 'healthy':
     case 'up':
       statusDot.classList.add('on');
       statusText.textContent = 'Комната активна';
+      // Гасим Nika, если висела от offline/restarting.
+      nikaNotify.classList.remove('show');
       break;
     default:
       break;
@@ -568,7 +576,17 @@ socket.on('error', (msg) => {
 socket.on('disconnect', () => {
   statusDot.classList.remove('on');
   statusText.textContent = 'Нет связи';
-  showError('Потеряна связь', 'Не удаётся подключиться к серверу комнаты.');
+  // Не пугаем модалкой: socket.io переподключится сам.
+});
+
+socket.on('connect', () => {
+  // Восстановили соединение с локальным сервером — обновляем статус.
+  if (roomActiveFlag) {
+    statusDot.classList.add('on');
+    statusText.textContent = currentRoomInfo?.provider === 'local'
+      ? 'Только локально'
+      : 'Комната активна';
+  }
 });
 
 // ═══════════ IFRAME MESSAGE ═══════════

@@ -1,19 +1,28 @@
 // core/tunnel-supervisor.js
 import { openTunnel, closeTunnel } from './tunnels/index.js';
+import dns from 'node:dns/promises';
 
 // ─── Настройки мониторинга ──────────────────────────────────
-const HEALTH_INTERVAL_MS       = 45_000;   // период проверки
-const INTERNET_TIMEOUT_MS      = 4_000;
+const HEALTH_INTERVAL_MS       = 45_000;
+const HEALTH_INTERVAL_OFFLINE  = 5_000;    // быстро ловим возврат сети
+const INTERNET_TIMEOUT_MS      = 3_000;
 const LOCAL_TIMEOUT_MS         = 4_000;
 const PUBLIC_TIMEOUT_MS        = 8_000;
-const FAILURES_BEFORE_RESTART  = 4;        // ~3 минуты подряд
+const CLOSE_TIMEOUT_MS         = 3_000;    // чтобы рестарт не висел на мёртвом cloudflared
+const FAILURES_BEFORE_RESTART  = 3;
 const RESTART_BACKOFF_MS       = [10_000, 20_000, 40_000, 60_000, 120_000];
 
-// ─── Публичные адреса для проверки интернета ────────────────
-const INTERNET_PROBES = [
-  'https://1.1.1.1/cdn-cgi/trace',
-  'https://cloudflare.com/cdn-cgi/trace',
-];
+// Readiness-чек: бьём в /api/room с нарастающими паузами.
+const READY_DELAYS_MS = [1000, 2000, 3000, 5000, 8000];
+
+// ВАЖНО: проверяем именно /api/room, а не /. Корень отдаёт HTML гостевого UI,
+// probeJson ждёт application/json → ловили ложные false.
+const PUBLIC_PROBE_PATH = '/api/room';
+
+// Проверка интернета через DNS, а не через fetch к 1.1.1.1:
+// IP-literal легко кэшируется ОС и не отваливается при потере сети,
+// из-за чего туннель считался «сломанным» вместо «оффлайн».
+const INTERNET_DNS_HOSTS = ['one.one.one.one', 'dns.google', 'cloudflare.com'];
 
 export class TunnelSupervisor {
   #port;
@@ -27,6 +36,7 @@ export class TunnelSupervisor {
   #restartAttempt = 0;
   #restarting = false;
   #stopped = false;
+  #lastState = 'unknown';
 
   constructor({ port, onUrlChange, onStateChange } = {}) {
     this.#port = port;
@@ -38,12 +48,16 @@ export class TunnelSupervisor {
   get provider() { return this.#provider; }
   get isHealthy() { return !!this.#url && this.#failures === 0; }
 
-  // Возвращает URL или null, если за отведённое время не удалось получить.
+  #emitState(state) {
+    this.#lastState = state?.state || state;
+    this.onStateChange(state);
+  }
+
   async waitForReady(timeoutMs = 15_000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (this.#url) return this.#url;
-      await new Promise(r => setTimeout(r, 500));
+      await sleep(500);
     }
     return this.#url;
   }
@@ -59,17 +73,27 @@ export class TunnelSupervisor {
       this.#restartAttempt = 0;
 
       console.log(`[tunnel-sup] Поднят: ${this.#provider} → ${this.#url}`);
-      this.onStateChange({ state: 'up', url: this.#url, provider: this.#provider });
 
-      if (this.#provider !== 'local' && this.#url?.startsWith('http')) {
-        this.#scheduleHealthCheck();
+      if (this.#provider === 'local') {
+        this.#emitState({ state: 'up', url: this.#url, provider: this.#provider });
+        return this.#url;
       }
+
+      const ready = await this.#waitUntilReachable(this.#url);
+      if (ready) {
+        console.log('[tunnel-sup] Публичный URL отвечает — туннель готов');
+        this.#emitState({ state: 'up', url: this.#url, provider: this.#provider });
+      } else {
+        console.warn('[tunnel-sup] URL пока не отвечает — доводим health-чекой');
+        this.#emitState({ state: 'warming', url: this.#url, provider: this.#provider });
+      }
+
+      this.#scheduleHealthCheck();
     } catch (err) {
       console.error('[tunnel-sup] Старт провалился:', err.message);
-      // Даже если туннель не поднялся — возвращаем localhost как fallback.
       this.#url = `http://localhost:${this.#port}`;
       this.#provider = 'local';
-      this.onStateChange({ state: 'degraded', url: this.#url });
+      this.#emitState({ state: 'degraded', url: this.#url });
     }
     return this.#url;
   }
@@ -80,23 +104,32 @@ export class TunnelSupervisor {
     clearTimeout(this.#restartTimer);
     this.#healthTimer = null;
     this.#restartTimer = null;
-    try { await closeTunnel(this.#instance); } catch {}
+    await closeWithTimeout(this.#instance, CLOSE_TIMEOUT_MS);
     this.#instance = null;
     this.#url = null;
     this.#provider = null;
   }
 
-  // Ручной форс-рестарт (например, из трея или из UI).
   async forceRestart() {
     if (this.#restarting) return;
     this.#failures = FAILURES_BEFORE_RESTART;
     await this.#restart();
   }
 
-  // ─── Health check ────────────────────────────────────────
-  #scheduleHealthCheck() {
+  async #waitUntilReachable(baseUrl) {
+    for (const delay of READY_DELAYS_MS) {
+      if (this.#stopped) return false;
+      await sleep(delay);
+      const ok = await probeJson(`${baseUrl}${PUBLIC_PROBE_PATH}`, PUBLIC_TIMEOUT_MS);
+      if (ok) return true;
+    }
+    return false;
+  }
+
+  #scheduleHealthCheck(intervalOverride) {
     clearTimeout(this.#healthTimer);
-    this.#healthTimer = setTimeout(() => this.#checkHealth(), HEALTH_INTERVAL_MS);
+    const interval = Number.isFinite(intervalOverride) ? intervalOverride : HEALTH_INTERVAL_MS;
+    this.#healthTimer = setTimeout(() => this.#checkHealth(), interval);
     this.#healthTimer.unref?.();
   }
 
@@ -105,26 +138,43 @@ export class TunnelSupervisor {
     if (this.#restarting) return;
     if (!this.#url || this.#provider === 'local') return;
 
-    // 1. Есть ли вообще интернет?
+    // 1. Интернет вообще есть?
     const hasInternet = await this.#checkInternet();
     if (!hasInternet) {
-      console.warn('[tunnel-sup] Интернета нет — туннель проверить нельзя');
-      this.onStateChange({ state: 'offline' });
-      this.#scheduleHealthCheck();
+      if (this.#lastState !== 'offline') {
+        console.warn('[tunnel-sup] Интернет пропал — ждём');
+        this.#emitState({ state: 'offline' });
+      }
+      // Оффлайн — это НЕ провал туннеля. Сбрасываем счётчик,
+      // чтобы при возврате сети не улететь в рестарт с накопленными фейлами.
+      this.#failures = 0;
+      this.#scheduleHealthCheck(HEALTH_INTERVAL_OFFLINE);
       return;
     }
 
-    // 2. Жив ли локальный сервер?
-    const localOk = await probeUrl(`http://127.0.0.1:${this.#port}/api/room`, LOCAL_TIMEOUT_MS, 'json');
+    if (this.#lastState === 'offline') {
+      console.log('[tunnel-sup] Интернет вернулся — перепроверяем туннель');
+    }
+
+    // 2. Локальный сервер жив?
+    const localOk = await probeJson(
+      `http://127.0.0.1:${this.#port}${PUBLIC_PROBE_PATH}`,
+      LOCAL_TIMEOUT_MS,
+    );
     if (!localOk) {
-      console.warn('[tunnel-sup] Локальный сервер не отвечает');
-      this.onStateChange({ state: 'local-down' });
+      if (this.#lastState !== 'local-down') {
+        console.warn('[tunnel-sup] Локальный сервер не отвечает');
+        this.#emitState({ state: 'local-down' });
+      }
       this.#scheduleHealthCheck();
       return;
     }
 
-    // 3. Отвечает ли публичный URL?
-    const publicOk = await probeUrl(this.#url, PUBLIC_TIMEOUT_MS, 'json');
+    // 3. Публичный URL отвечает валидным JSON?
+    const publicOk = await probeJson(
+      `${this.#url}${PUBLIC_PROBE_PATH}`,
+      PUBLIC_TIMEOUT_MS,
+    );
 
     if (publicOk) {
       if (this.#failures > 0) {
@@ -132,39 +182,40 @@ export class TunnelSupervisor {
       }
       this.#failures = 0;
       this.#restartAttempt = 0;
-      this.onStateChange({ state: 'healthy', url: this.#url, provider: this.#provider });
-    } else {
-      this.#failures++;
-      console.warn(`[tunnel-sup] Fail ${this.#failures}/${FAILURES_BEFORE_RESTART}`);
-      this.onStateChange({
-        state: 'unhealthy',
-        failures: this.#failures,
-        threshold: FAILURES_BEFORE_RESTART,
-      });
-
-      if (this.#failures >= FAILURES_BEFORE_RESTART) {
-        this.#scheduleRestart();
-        return;
-      }
+      this.#emitState({ state: 'healthy', url: this.#url, provider: this.#provider });
+      this.#scheduleHealthCheck();
+      return;
     }
 
+    // Публичный URL молчит, а интернет есть — это реальный провал.
+    this.#failures++;
+    console.warn(`[tunnel-sup] Fail ${this.#failures}/${FAILURES_BEFORE_RESTART} (${this.#url})`);
+    this.#emitState({
+      state: 'unhealthy',
+      failures: this.#failures,
+      threshold: FAILURES_BEFORE_RESTART,
+      url: this.#url,
+    });
+
+    if (this.#failures >= FAILURES_BEFORE_RESTART) {
+      this.#scheduleRestart();
+      return;
+    }
     this.#scheduleHealthCheck();
   }
 
   async #checkInternet() {
-    for (const url of INTERNET_PROBES) {
+    // DNS-резолв публичных имён. Быстро, не подменяется провайдером-заглушкой,
+    // не живёт в DNS-кэше Windows так агрессивно, как HTTP-кэш IP-литералов.
+    for (const host of INTERNET_DNS_HOSTS) {
       try {
-        const ctl = new AbortController();
-        const t = setTimeout(() => ctl.abort(), INTERNET_TIMEOUT_MS);
-        const res = await fetch(url, { signal: ctl.signal });
-        clearTimeout(t);
-        if (res.ok) return true;
+        const result = await withTimeout(dns.lookup(host), INTERNET_TIMEOUT_MS);
+        if (result?.address) return true;
       } catch { /* пробуем следующий */ }
     }
     return false;
   }
 
-  // ─── Пересоздание туннеля ────────────────────────────────
   #scheduleRestart() {
     if (this.#restarting || this.#stopped) return;
     this.#restarting = true;
@@ -174,7 +225,7 @@ export class TunnelSupervisor {
     this.#restartAttempt++;
 
     console.warn(`[tunnel-sup] Пересоздание через ${delay / 1000}с (попытка ${this.#restartAttempt})`);
-    this.onStateChange({
+    this.#emitState({
       state: 'restarting',
       attempt: this.#restartAttempt,
       delay,
@@ -189,7 +240,9 @@ export class TunnelSupervisor {
     if (this.#stopped) return;
     const oldUrl = this.#url;
 
-    try { await closeTunnel(this.#instance); } catch {}
+    // Закрываем старый с таймаутом: если cloudflared уже умер,
+    // close() может висеть и блокировать рестарт навсегда.
+    await closeWithTimeout(this.#instance, CLOSE_TIMEOUT_MS);
     this.#instance = null;
     this.#url = null;
 
@@ -203,7 +256,19 @@ export class TunnelSupervisor {
       this.#restartAttempt = 0;
 
       console.log(`[tunnel-sup] Пересоздан: ${this.#url}`);
-      this.onStateChange({ state: 'up', url: this.#url, provider: this.#provider });
+
+      if (this.#provider !== 'local') {
+        const ready = await this.#waitUntilReachable(this.#url);
+        if (ready) {
+          console.log('[tunnel-sup] Новый URL отвечает');
+          this.#emitState({ state: 'up', url: this.#url, provider: this.#provider });
+        } else {
+          console.warn('[tunnel-sup] Новый URL пока не отвечает');
+          this.#emitState({ state: 'warming', url: this.#url, provider: this.#provider });
+        }
+      } else {
+        this.#emitState({ state: 'up', url: this.#url, provider: this.#provider });
+      }
 
       if (oldUrl && this.#url && oldUrl !== this.#url) {
         this.onUrlChange({ oldUrl, newUrl: this.#url, provider: this.#provider });
@@ -220,10 +285,23 @@ export class TunnelSupervisor {
   }
 }
 
-// ─── Утилита: проверка URL ──────────────────────────────────
-// expect = 'json' → требуем Content-Type: application/json
-// expect = null   → достаточно успешного ответа
-async function probeUrl(url, timeoutMs, expect = null) {
+// ─── Утилиты ────────────────────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
+
+async function closeWithTimeout(instance, ms) {
+  if (!instance) return;
+  try { await withTimeout(closeTunnel(instance), ms); }
+  catch { /* не даём close() заблокировать рестарт */ }
+}
+
+async function probeJson(url, timeoutMs) {
   try {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);
@@ -235,10 +313,8 @@ async function probeUrl(url, timeoutMs, expect = null) {
     });
     clearTimeout(t);
     if (!res.ok) return false;
-    if (expect === 'json') {
-      const ct = res.headers.get('content-type') || '';
-      if (!ct.includes('application/json')) return false;
-    }
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) return false;
     return true;
   } catch {
     return false;
