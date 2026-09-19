@@ -1549,3 +1549,27 @@ select {
   opacity: 1;
   transform: translateY(0);
 }
+
+/* ═══════════ BUILTIN TAG ═══════════ */
+.plugin-builtin-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  vertical-align: middle;
+}
+
+/* Кнопка удаления — плотнее, чтобы не растягивала ряд */
+.plugin-actions .btn[data-action="delete"] {
+  flex: 0 0 auto;
+  min-width: 36px;
+  padding: 7px 10px;
+  font-size: 13px;
+}

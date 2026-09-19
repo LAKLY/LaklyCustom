@@ -145,15 +145,31 @@ export async function startServer({
     }
   });
 
-  app.delete('/api/plugins/:id/config', async (req, res) => {
+  app.delete('/api/plugins/:id', async (req, res) => {
+    if (!isLocalRequest(req)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
     try {
       const { id } = req.params;
-      if (!pluginLoader.get(id)) return res.status(404).json({ error: 'plugin not found' });
-      await pluginLoader.resetConfig(id);
-      await pluginLoader.reloadOne(id);
+      if (!pluginLoader.get(id)) {
+        return res.status(404).json({ error: 'plugin not found' });
+      }
+      if (pluginLoader.isBuiltin(id)) {
+        return res.status(400).json({ error: 'Встроенный плагин нельзя удалить' });
+      }
+
+      // Если этот плагин сейчас активен в комнате — сначала корректно стопаем игру.
+      const room = roomManager.findActive();
+      if (room && room.activePluginName === id && room.gameActive) {
+        try { await room.stopGame(); } catch (e) {
+          console.warn('[plugins] stopGame перед удалением:', e.message);
+        }
+      }
+
+      await pluginLoader.uninstall(id);
       res.json({ ok: true });
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      res.status(400).json({ error: e.message });
     }
   });
 
@@ -205,9 +221,14 @@ export async function startServer({
   // ─── Статика ────────────────────────────────────────────────
   app.use('/host', express.static(path.join(ROOT, 'ui'), noCache));
   app.use('/assets', express.static(path.join(ROOT, 'assets'), noCache));
-  for (const plugin of pluginLoader.plugins.values()) {
-    app.use(`/plugins/${plugin.id}`, express.static(plugin.publicDir, noCache));
-  }
+  // Статика плагинов регистрируется динамически, а не при старте:
+  // плагины можно ставить и удалять в рантайме, express.static на старте
+  // их бы не увидел (или держал бы ссылку на удалённую папку).
+  app.use('/plugins/:pluginId', (req, res, next) => {
+    const plugin = pluginLoader.get(req.params.pluginId);
+    if (!plugin) return next();
+    express.static(plugin.publicDir, noCache)(req, res, next);
+  });
 
   // ─── Proxy runtime ─────────────────────────────────────────
   app.use((req, res, next) => {

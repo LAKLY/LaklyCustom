@@ -18,6 +18,11 @@ const ALLOWED_EXT = new Set([
   '.txt', '.md',
 ]);
 
+// Встроенные плагины, которые поставляются с приложением и не могут быть
+// удалены через UI. Держим это в ядре, а не в manifest.json — иначе любой
+// мог бы снять флаг "builtin" правкой манифеста.
+const BUILTIN_PLUGINS = new Set(['clicker']);
+
 export class PluginLoader {
   constructor(pluginsDir, { pluginDataDir } = {}) {
     this.pluginsDir = pluginsDir;
@@ -94,6 +99,56 @@ export class PluginLoader {
       else this.handlers.set(event, filtered);
     }
     await this.emit(EVENTS.PLUGIN_UNLOADED, { name: pluginName });
+  }
+
+  // ─── Удаление плагина ───────────────────────────────────────
+  // Выгружает хост, чистит handlers, удаляет папку и пользовательский конфиг.
+  // Встроенные плагины удалять нельзя.
+  async uninstall(id) {
+    if (typeof id !== 'string' || !id) {
+      throw new Error('Некорректный id плагина');
+    }
+    if (BUILTIN_PLUGINS.has(id)) {
+      throw new Error('Встроенный плагин нельзя удалить');
+    }
+
+    const rec = this.plugins.get(id);
+    if (!rec) {
+      throw new Error('Плагин не найден');
+    }
+
+    // Проверяем, что dir — именно эта папка в plugins/, а не что-то снаружи.
+    const expected = path.join(this.pluginsDir, id);
+    if (path.resolve(rec.dir) !== path.resolve(expected)) {
+      throw new Error('Подозрительный путь плагина');
+    }
+
+    // Выгружаем worker
+    try { await rec.host?.unload?.(); } catch (err) {
+      console.warn(`[plugins] ${id}: ошибка при unload перед удалением:`, err.message);
+    }
+
+    // Убираем из реестра
+    this.plugins.delete(id);
+    for (const [event, list] of this.handlers) {
+      const filtered = list.filter(h => h.pluginName !== id);
+      if (filtered.length === 0) this.handlers.delete(event);
+      else this.handlers.set(event, filtered);
+    }
+
+    // Удаляем папку плагина
+    await fs.rm(expected, { recursive: true, force: true });
+
+    // Удаляем пользовательский конфиг (в plugin-data)
+    try {
+      const cfgPath = path.join(this.pluginDataDir, `${id}.json`);
+      await fs.rm(cfgPath, { force: true });
+    } catch (err) {
+      console.warn(`[plugins] ${id}: не удалось удалить конфиг:`, err.message);
+    }
+
+    console.log(`[plugins] Удалён: ${id}`);
+    await this.emit(EVENTS.PLUGIN_UNLOADED, { name: id });
   }
 
   // ─── Конфиг ─────────────────────────────────────────────────
@@ -215,11 +270,14 @@ export class PluginLoader {
 
   get(name) { return this.plugins.get(name) || null; }
 
+  isBuiltin(name) { return BUILTIN_PLUGINS.has(name); }
+
   list() {
     return [...this.plugins.values()].map(p => ({
       id: p.id, name: p.name, version: p.version,
       description: p.description, apiVersion: p.apiVersion,
       hasConfig: !!p.hasConfig,
+      isBuiltin: BUILTIN_PLUGINS.has(p.id),
     }));
   }
 

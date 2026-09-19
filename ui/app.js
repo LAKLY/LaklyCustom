@@ -722,16 +722,27 @@ function renderPluginsGrid() {
       actionTitle = `Сейчас запущено: ${activePluginName}`;
     }
 
+    const configBtn = p.hasConfig
+      ? `<button class="btn btn-ghost btn-sm" data-action="config" title="Настройки">⚙</button>`
+      : '';
+    const deleteBtn = p.isBuiltin
+      ? ''
+      : `<button class="btn btn-ghost-danger btn-sm" data-action="delete" title="Удалить плагин">🗑</button>`;
+
     card.innerHTML = `
       <div class="plugin-emoji">${EMOJI[p.id] || '🎮'}</div>
       <div class="plugin-name">${escapeHtml(p.name)}</div>
       <div class="plugin-desc">${escapeHtml(p.description || '')}</div>
-      <div class="plugin-meta">v${escapeHtml(p.version)}</div>
+      <div class="plugin-meta">
+        v${escapeHtml(p.version)}
+        ${p.isBuiltin ? '<span class="plugin-builtin-tag">встроенный</span>' : ''}
+      </div>
       <div class="plugin-actions">
         <button class="${actionClass}" data-action="launch"
                 ${actionDisabled ? 'disabled' : ''}
                 title="${escapeHtml(actionTitle)}">${actionLabel}</button>
-        ${p.hasConfig ? `<button class="btn btn-ghost btn-sm" data-action="config" title="Настройки">⚙</button>` : ''}
+        ${configBtn}
+        ${deleteBtn}
       </div>
     `;
     pluginsGrid.insertBefore(card, pluginAddTile);
@@ -749,6 +760,46 @@ function renderPluginsGrid() {
       openConfigModal(id);
     };
   });
+  pluginsGrid.querySelectorAll('[data-action="delete"]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.closest('.plugin-card').dataset.pluginId;
+      removePlugin(id);
+    };
+  });
+}
+
+// ─── Удаление плагина ──────────────────────────────────────────
+async function removePlugin(pluginId) {
+  const card = pluginsGrid.querySelector(`.plugin-card[data-plugin-id="${CSS.escape(pluginId)}"]`);
+  const displayName = card?.querySelector('.plugin-name')?.textContent?.trim() || pluginId;
+
+  if (!confirm(`Удалить плагин «${displayName}»?\n\nФайлы будут стёрты с диска, настройки плагина сбросятся.`)) {
+    return;
+  }
+
+  try {
+    const r = await fetch(`/api/plugins/${encodeURIComponent(pluginId)}`, {
+      method: 'DELETE',
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+
+    toast(`Плагин «${displayName}» удалён`);
+
+    // Если удалили активный плагин — сервер уже остановил игру,
+    // но подчистим UI на всякий случай.
+    if (activePluginName === pluginId) {
+      activePluginName = null;
+      gameFrameWrap.hidden = true;
+      gameFrame.src = 'about:blank';
+      gameStatus.textContent = 'Не запущена';
+      updateGameControls();
+    }
+
+    await loadPlugins();
+  } catch (e) {
+    showError('Не удалось удалить', e.message);
+  }
 }
 
 function launchGameFromCard(pluginId) {
