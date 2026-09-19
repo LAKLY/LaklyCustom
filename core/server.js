@@ -41,6 +41,25 @@ function buildCorsOrigin() {
   };
 }
 
+/**
+ * Считаем запрос локальным, если он пришёл напрямую от того же ПК
+ * (Electron-хост-UI или браузер на localhost), а НЕ через туннель.
+ *
+ * Признаки внешнего запроса:
+ *  - CF-Connecting-IP — заголовок, который добавляет cloudflared
+ *  - X-Forwarded-For — добавляет ngrok и любой другой upstream-прокси
+ */
+function isLocalRequest(req) {
+  if (req.headers['cf-connecting-ip']) return false;
+  const xff = req.headers['x-forwarded-for'];
+  if (xff && String(xff).trim() !== '') return false;
+
+  const ip = req.ip || req.socket?.remoteAddress || '';
+  return ip === '127.0.0.1'
+      || ip === '::1'
+      || ip === '::ffff:127.0.0.1';
+}
+
 export async function startServer({
   port = 3000,
   hooks = {},
@@ -76,7 +95,7 @@ export async function startServer({
     if (!proxyRoom || !proxyRoom.proxyPort) return;
 
     const opts = proxyRoom.options || {};
-    if (opts.ws === false) return; // WebSocket отключён в настройках
+    if (opts.ws === false) return;
 
     const target = `http://127.0.0.1:${proxyRoom.proxyPort}`;
     proxyServer.ws(req, socket, head, {
@@ -107,7 +126,7 @@ export async function startServer({
     res.json({ plugins: pluginLoader.list() });
   });
 
-  // ─── НОВОЕ: конфиг плагина ──────────────────────────────────
+  // ─── Конфиг плагина ────────────────────────────────────────
   app.get('/api/plugins/:id/config', async (req, res) => {
     try {
       const { id } = req.params;
@@ -156,7 +175,12 @@ export async function startServer({
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // ─── Proxy probe (только с локального адреса) ──────────────
   app.post('/api/proxy/check', async (req, res) => {
+    if (!isLocalRequest(req)) {
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
+
     const ip = req.ip || 'unknown';
     if (!limiter.check(`proxy-check:${ip}`, PROXY_CHECK_RATE)) {
       return res.status(429).json({ ok: false, error: 'Слишком часто' });
@@ -175,6 +199,10 @@ export async function startServer({
   });
 
   app.get('/api/proxy/scan', async (req, res) => {
+    if (!isLocalRequest(req)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
     const ip = req.ip || 'unknown';
     if (!limiter.check(`proxy-scan:${ip}`, PROXY_CHECK_RATE)) {
       return res.status(429).json({ error: 'Слишком часто' });
@@ -192,7 +220,7 @@ export async function startServer({
     app.use(`/plugins/${plugin.id}`, express.static(plugin.publicDir, noCache));
   }
 
-  // --- PROXY MIDDLEWARE ---
+  // ─── Proxy runtime ─────────────────────────────────────────
   app.use((req, res, next) => {
     if (req.path.startsWith('/socket.io/')) return next();
     const proxyRoom = roomManager.findActive('proxy');
@@ -211,7 +239,7 @@ export async function startServer({
     });
   });
 
-  // --- STATIC MIDDLEWARE ---
+  // ─── Static runtime ────────────────────────────────────────
   app.use((req, res, next) => {
     if (req.method !== 'GET') return next();
     const staticRoom = roomManager.findActive('static');
@@ -219,16 +247,15 @@ export async function startServer({
 
     const opts = staticRoom.options || {};
     const staticOpts = {
-      etag: opts.noCache ? false : true,
-      lastModified: opts.noCache ? false : true,
-      cacheControl: opts.noCache ? false : true,
+      etag: !opts.noCache,
+      lastModified: !opts.noCache,
+      cacheControl: !opts.noCache,
       dotfiles: opts.dotFiles ? 'allow' : 'ignore',
     };
 
     const mw = express.static(staticRoom.staticDir, staticOpts);
     mw(req, res, (err) => {
       if (err) return next(err);
-      // файл не найден
       if (opts.spaFallback) {
         return res.sendFile(path.join(staticRoom.staticDir, 'index.html'), (e) => {
           if (e) next();
@@ -238,6 +265,7 @@ export async function startServer({
     });
   });
 
+  // ─── Default статика (лобби) ───────────────────────────────
   app.use(express.static(path.join(ROOT, 'public'), noCache));
 
   // ─── Socket.IO ──────────────────────────────────────────────
@@ -253,7 +281,8 @@ export async function startServer({
       const name = validateRoomName(payload.roomName);
       const requestedType = (payload.type === 'static' || payload.type === 'proxy')
         ? payload.type : 'default';
-      const options = (payload.options && typeof payload.options === 'object') ? payload.options : {};
+      const options = (payload.options && typeof payload.options === 'object')
+        ? payload.options : {};
 
       let staticDir = null, pluginName = null, proxyPort = null;
 
