@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>LaklyCustom</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+
+<div id="join-screen" class="screen active">
+  <div class="panel">
+    <div class="logo">◆</div>
+    <h1>LaklyCustom</h1>
+    <p class="sub">Введите имя, чтобы войти в комнату</p>
+    <input id="player-name" placeholder="Ваш ник" maxlength="20" autofocus>
+    <button id="btn-join" class="btn btn-primary">Войти</button>
+    <div id="join-error" class="error"></div>
+  </div>
+</div>
+
+<div id="room-screen" class="screen">
+  <header class="topbar">
+    <span class="topbar-title">Комната</span>
+    <span id="player-self" class="self"></span>
+  </header>
+
+  <section class="block">
+    <h3>Игроки <span id="count" class="badge">0</span></h3>
+    <div id="players" class="players"><div class="empty">Пока никого</div></div>
+  </section>
+
+  <section class="game-block" id="game-block" style="display:none">
+    <iframe id="game-frame" sandbox="allow-scripts allow-same-origin allow-forms" style="width:100%;height:60vh;border:0;border-radius:8px;background:var(--panel)"></iframe>
+  </section>
+
+  <section class="block chat-block">
+    <h3>Чат</h3>
+    <div id="chat" class="chat"></div>
+    <div class="chat-input">
+      <input id="chat-input" placeholder="Сообщение..." maxlength="200">
+      <button id="btn-send" class="btn btn-primary">→</button>
+    </div>
+  </section>
+</div>
+
+<div id="closed-screen" class="screen">
+  <div class="panel">
+    <h1>Комната закрыта</h1>
+    <p class="sub">Хост завершил сессию</p>
+  </div>
+</div>
+
+<script src="/client.js"></script>
+</body>
+</html>
