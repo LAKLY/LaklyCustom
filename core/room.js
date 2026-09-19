@@ -12,8 +12,10 @@ export class Room {
     this.pluginLoader = pluginLoader;
     this.hostSocketId = hostSocket.id;
 
+    // joinToken проверяется в player:join из URL-параметра ?t=.
+    // hostToken не используется: host-команды защищены socket.id + WSS,
+    // второй фактор даёт только видимость безопасности без реальной пользы.
     this.joinToken = uuidv4();
-    this.hostToken = uuidv4();
 
     this.players = new Map();
     this.messages = [];
@@ -25,9 +27,7 @@ export class Room {
 
     // Тип комнаты: 'default' | 'plugin' | 'static' | 'proxy'
     this.type = pluginName ? 'plugin' : 'default';
-    // Для static-режима — путь к папке на диске
     this.staticDir = null;
-    // Для proxy-режима — порт локального приложения
     this.proxyPort = null;
   }
 
@@ -103,7 +103,13 @@ export class Room {
   }
 
   async startGame(pluginName) {
-    if (!this.pluginLoader.get(pluginName)) return false;
+    // Игры разрешены только в default/plugin-комнатах.
+    // В static/proxy крутится чужое приложение, там наши плагины неуместны.
+    if (this.type !== 'default' && this.type !== 'plugin') return false;
+
+    const plugin = this.pluginLoader.get(pluginName);
+    if (!plugin) return false;
+
     this.activePluginName = pluginName;
     this.gameActive = true;
     this.broadcast(EVENTS.GAME_STARTED, {

@@ -280,9 +280,12 @@ export class PluginLoader {
    */
   _validateManifest(raw, fallbackId) {
     if (!raw || typeof raw !== 'object') {
-      // Разрешаем плагины без manifest, если у них есть index.js (legacy)
+      // Legacy fallback: плагины без manifest.json.
+      // Работает, но с предупреждением. В 0.9 станет opt-in через флаг,
+      // в 1.0 — обязательный manifest.
       const id = this._sanitizeId(fallbackId);
       if (!id) return null;
+      console.warn(`[plugins] ${fallbackId}: нет manifest.json — legacy режим. Добавьте manifest для совместимости с будущими версиями.`);
       return {
         id,
         name: id,

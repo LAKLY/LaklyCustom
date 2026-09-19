@@ -28,7 +28,16 @@ const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 let win = null, srv = null, tray = null;
 let playerCount = 0, roomActive = false;
 
-const DEFAULT_SETTINGS = { tunnel: 'auto', port: 3000, ngrokToken: '' };
+// Папки, которые пользователь явно выбрал через нативный диалог.
+// Только эти пути сервер имеет право использовать для static-комнат.
+const allowedStaticDirs = new Set();
+
+const DEFAULT_SETTINGS = {
+  tunnel: 'auto',
+  port: 3000,
+  ngrokToken: '',
+  allowedStaticDirs: [],
+};
 
 async function readSettings() {
   try { return { ...DEFAULT_SETTINGS, ...JSON.parse(await fs.readFile(settingsPath, 'utf8')) }; }
@@ -53,14 +62,27 @@ ipcMain.handle('plugin:install-zip', async (_e, zipPath) => {
   }
 });
 
-// --- Выбор папки для static-комнаты ---
+// --- Выбор папки для static-комнаты (со занесением в whitelist) ---
 ipcMain.handle('dialog:pick-directory', async () => {
   const result = await dialog.showOpenDialog(win, {
     title: 'Выберите папку с HTML',
     properties: ['openDirectory'],
   });
   if (result.canceled || !result.filePaths.length) return null;
-  return result.filePaths[0];
+
+  const dir = result.filePaths[0];
+  allowedStaticDirs.add(dir);
+
+  // persist — чтобы после перезапуска список сохранился
+  try {
+    const s = await readSettings();
+    s.allowedStaticDirs = [...allowedStaticDirs];
+    await writeSettings(s);
+  } catch (e) {
+    console.warn('[static-dirs] не удалось сохранить whitelist:', e.message);
+  }
+
+  return dir;
 });
 
 ipcMain.handle('shell:open-path', async (_e, p) => {
@@ -129,9 +151,20 @@ const serverHooks = {
 
 async function bootstrap() {
   const settings = await readSettings();
+
+  // Загружаем сохранённый whitelist
+  for (const dir of (settings.allowedStaticDirs || [])) {
+    if (typeof dir === 'string') allowedStaticDirs.add(dir);
+  }
+
   const port = Number(settings.port) || 3000;
 
-  srv = await startServer({ port, hooks: serverHooks });
+  srv = await startServer({
+    port,
+    hooks: serverHooks,
+    // Сервер проверяет каждый staticDir против этого whitelist
+    isAllowedStaticDir: (dir) => allowedStaticDirs.has(dir),
+  });
   console.log('[electron] server on port', srv.port);
 
   win = new BrowserWindow({

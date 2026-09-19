@@ -18,7 +18,10 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - name: Install (без electron postinstall)
+
+      # --ignore-scripts: не тащим electron-бинарник в CI, тесты его не требуют
+      - name: Install
         run: npm ci --ignore-scripts
+
       - name: Run tests
         run: npm test

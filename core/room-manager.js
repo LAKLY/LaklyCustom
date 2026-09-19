@@ -1,5 +1,6 @@
 // core/room-manager.js
 import { Room } from './room.js';
+import { EVENTS } from '../shared/events.js';
 
 export class RoomManager {
   constructor(io, pluginLoader) {
@@ -11,6 +12,7 @@ export class RoomManager {
 
   async createRoom({ name, hostSocket, pluginName = null, type = 'default',
                      staticDir = null, proxyPort = null }) {
+    // Закрываем прежнюю комнату этого же хоста
     for (const room of this.rooms.values()) {
       if (room.hostSocketId === hostSocket.id && room.isActive) {
         await room.close('replaced');
@@ -32,6 +34,10 @@ export class RoomManager {
     this.rooms.set(room.id, room);
     this.socketRoom.set(hostSocket.id, room.id);
     hostSocket.join(room.channel());
+
+    // Lifecycle-хук: плагины могут инициализировать своё состояние
+    await this.pluginLoader.emit(EVENTS.ROOM_CREATED, { room });
+
     return room;
   }
 
@@ -42,10 +48,16 @@ export class RoomManager {
     return roomId ? this.rooms.get(roomId) : null;
   }
 
-  /** Найти активную комнату по типу (используется в proxy/static middleware) */
+  /**
+   * Найти активную комнату.
+   * - без аргумента: любую активную
+   * - с типом: только указанного типа ('default' | 'plugin' | 'static' | 'proxy')
+   */
   findActive(type) {
     for (const room of this.rooms.values()) {
-      if (room.isActive && room.type === type) return room;
+      if (!room.isActive) continue;
+      if (type !== undefined && room.type !== type) continue;
+      return room;
     }
     return null;
   }

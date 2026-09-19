@@ -49,7 +49,11 @@ function buildCorsOrigin() {
   };
 }
 
-export async function startServer({ port = 3000, hooks = {} } = {}) {
+export async function startServer({
+  port = 3000,
+  hooks = {},
+  isAllowedStaticDir = () => false,   // whitelist от main-процесса
+} = {}) {
   const app = express();
   const httpServer = createServer(app);
   const io = new Server(httpServer, { cors: { origin: buildCorsOrigin() } });
@@ -201,6 +205,14 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
       if (requestedType === 'static') {
         if (typeof payload.staticDir !== 'string' || !payload.staticDir) {
           socket.emit('error', 'Не выбрана папка для статики');
+          return;
+        }
+        // Defense-in-depth: разрешаем только папки, выбранные через нативный
+        // диалог в main-процессе. Даже если host-сессия скомпрометирована,
+        // произвольный путь из Socket.IO не будет принят.
+        if (!isAllowedStaticDir(payload.staticDir)) {
+          console.warn('[static] отклонён незарегистрированный путь:', payload.staticDir);
+          socket.emit('error', 'Эта папка не была выбрана через диалог');
           return;
         }
         try {
