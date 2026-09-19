@@ -203,3 +203,23 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(0, 245, 255, 0.15); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(0, 245, 255, 0.3); }
+/* Mode switch (Static / Plugin) */
+.mode-switch { display: flex; gap: 16px; flex-wrap: wrap; }
+.mode-option {
+  display: flex; align-items: center; gap: 8px;
+  cursor: pointer; font-size: 14px; padding: 8px 12px;
+  border: 1px solid var(--border); border-radius: 8px;
+  transition: border-color .15s, background .15s;
+}
+.mode-option:hover { border-color: var(--cyan); background: rgba(0,245,255,.04); }
+.mode-option input[type="radio"] { accent-color: var(--cyan); }
+.mode-option input:checked + span { color: var(--cyan); font-weight: 500; }
+/* Proxy status */
+.proxy-status {
+  margin-top: 8px; font-size: 12.5px; color: var(--muted);
+  min-height: 16px; line-height: 1.4;
+}
+.proxy-status.ok { color: #2ED573; }
+.proxy-status.err { color: var(--pink); }
+.proxy-status a { color: var(--cyan); text-decoration: underline; cursor: pointer; }
+.proxy-status a:hover { text-decoration: none; }

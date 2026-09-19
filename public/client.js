@@ -1,5 +1,7 @@
 const joinToken = new URLSearchParams(location.search).get('t') || '';
+const socket = io();
 const $ = id => document.getElementById(id);
+
 let me = null;
 let messages = [];
 let activeGame = null;
@@ -55,7 +57,6 @@ socket.on('error', (msg) => { $('join-error').textContent = typeof msg === 'stri
 socket.on('game:started', ({ plugin, url }) => showGame(plugin, url));
 socket.on('game:stopped', () => hideGame());
 
-// Пересылаем состояние игры в iframe
 socket.on('game:state', (data) => {
   lastGameState = data;
   const frame = $('game-frame');

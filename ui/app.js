@@ -32,6 +32,17 @@ const btnGameStop   = $('btn-game-stop');
 const dropZone      = $('drop-zone');
 const btnInstallPlugin = $('btn-install-plugin');
 
+const modeRadios    = document.querySelectorAll('input[name="room-mode"]');
+const staticPicker  = $('static-picker');
+const staticDirInput = $('static-dir');
+const btnPickDir    = $('btn-pick-dir');
+
+const proxyPicker    = $('proxy-picker');
+const proxyPortInput = $('proxy-port');
+const btnCheckPort   = $('btn-check-port');
+const btnScanPorts   = $('btn-scan-ports');
+const proxyStatusEl  = $('proxy-status');
+
 let messages = [];
 let activePluginName = null;
 let progressTimer = null;
@@ -113,12 +124,35 @@ async function loadPlugins() {
   }
 }
 
-// --- Кнопки ---
+// --- Старт ---
 btnStart.onclick = () => {
+  const mode = document.querySelector('input[name="room-mode"]:checked')?.value || 'default';
+
+  if (mode === 'static') {
+    const dir = staticDirInput.value;
+    if (!dir || dir === 'Папка не выбрана') { toast('Сначала выберите папку'); return; }
+    btnStart.disabled = true;
+    startProgressHints();
+    socket.emit('host:create-room', { roomName: 'Lakly Room', type: 'static', staticDir: dir });
+    return;
+  }
+
+  if (mode === 'proxy') {
+    const port = Number(proxyPortInput.value);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      toast('Введите порт от 1 до 65535');
+      return;
+    }
+    btnStart.disabled = true;
+    startProgressHints();
+    socket.emit('host:create-room', { roomName: 'Lakly Room', type: 'proxy', proxyPort: port });
+    return;
+  }
+
   btnStart.disabled = true;
   startProgressHints();
   const pluginName = pluginSelect.value || null;
-  socket.emit('host:create-room', { roomName: 'Lakly Room', pluginName });
+  socket.emit('host:create-room', { roomName: 'Lakly Room', type: 'default', pluginName });
 };
 
 btnStop.onclick = () => {
@@ -163,7 +197,9 @@ socket.on('host:room-created', async (data) => {
   stopProgressHints();
   statusDot.classList.add('on');
   const isPublic = data.provider !== 'local';
-  statusText.textContent = isPublic ? `Комната активна (${data.provider})` : 'Только локальная сеть';
+  statusText.textContent = isPublic
+    ? `Комната активна (${data.provider})`
+    : 'Только локальная сеть';
 
   roomUrl.value = data.publicUrl;
   btnCopy.disabled = false;
@@ -171,10 +207,23 @@ socket.on('host:room-created', async (data) => {
   btnJoinGuest.disabled = false;
   btnSend.disabled = false;
   chatInput.disabled = false;
-  btnGameStart.disabled = !data.activePlugin;
 
-  activePluginName = data.activePlugin || null;
-  updateGameControls();
+  gameFrameWrap.style.display = 'none';
+  gameFrame.src = 'about:blank';
+
+  if (data.type === 'static') {
+    gameStatus.textContent = 'Static-режим — гости видят вашу папку';
+    btnGameStart.disabled = true;
+    btnGameStop.disabled = true;
+  } else if (data.type === 'proxy') {
+    gameStatus.textContent = `Прокси → 127.0.0.1:${data.proxyPort || '?'}`;
+    btnGameStart.disabled = true;
+    btnGameStop.disabled = true;
+  } else {
+    gameStatus.textContent = 'Игра не запущена';
+    activePluginName = data.activePlugin || null;
+    updateGameControls();
+  }
 
   try {
     const r = await fetch('/api/qr');
@@ -236,7 +285,7 @@ socket.on('disconnect', () => {
   statusText.textContent = 'Нет связи с сервером';
 });
 
-// --- Один обработчик message от iframe, с проверкой source ---
+// --- Единственный обработчик message от iframe ---
 window.addEventListener('message', (e) => {
   if (!gameFrame?.contentWindow || e.source !== gameFrame.contentWindow) return;
   if (!e.data || typeof e.data !== 'object') return;
@@ -325,6 +374,10 @@ function resetUi() {
   gameFrame.src = 'about:blank';
   gameStatus.textContent = 'Игра не запущена';
   updateGameControls();
+  if (proxyStatusEl) {
+    proxyStatusEl.textContent = '';
+    proxyStatusEl.className = 'proxy-status';
+  }
 }
 
 async function loadSettings() {
@@ -345,6 +398,92 @@ $('btn-save-settings').onclick = async () => {
     port: Number($('set-port').value) || 3000,
   });
   toast('Сохранено. Перезапустите приложение.');
+};
+
+// --- Переключатель режимов ---
+modeRadios.forEach(r => {
+  r.addEventListener('change', () => {
+    const mode = document.querySelector('input[name="room-mode"]:checked')?.value;
+    staticPicker.style.display = mode === 'static' ? 'block' : 'none';
+    proxyPicker.style.display = mode === 'proxy' ? 'block' : 'none';
+  });
+});
+
+btnPickDir.onclick = async () => {
+  if (!window.lakly?.pickDirectory) { toast('Диалог недоступен'); return; }
+  const dir = await window.lakly.pickDirectory();
+  if (dir) {
+    staticDirInput.value = dir;
+    toast('Папка выбрана');
+  }
+};
+
+// --- Проверка порта ---
+btnCheckPort.onclick = async () => {
+  const port = Number(proxyPortInput.value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    proxyStatusEl.textContent = 'Некорректный порт';
+    proxyStatusEl.className = 'proxy-status err';
+    return;
+  }
+  proxyStatusEl.textContent = 'Проверяем…';
+  proxyStatusEl.className = 'proxy-status';
+  try {
+    const r = await fetch('/api/proxy/check', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ port }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      const info = [];
+      if (j.hint) info.push(j.hint);
+      if (j.probe?.status) info.push(`HTTP ${j.probe.status}`);
+      if (j.probe?.title) info.push(`«${j.probe.title}»`);
+      proxyStatusEl.textContent = `✓ Порт ${j.port} отвечает${info.length ? ' — ' + info.join(' · ') : ''}`;
+      proxyStatusEl.className = 'proxy-status ok';
+    } else {
+      proxyStatusEl.textContent = `✗ ${j.error || 'Не отвечает'}`;
+      proxyStatusEl.className = 'proxy-status err';
+    }
+  } catch (e) {
+    proxyStatusEl.textContent = 'Ошибка: ' + e.message;
+    proxyStatusEl.className = 'proxy-status err';
+  }
+};
+
+btnScanPorts.onclick = async () => {
+  proxyStatusEl.textContent = 'Сканируем популярные порты…';
+  proxyStatusEl.className = 'proxy-status';
+  try {
+    const r = await fetch('/api/proxy/scan');
+    const j = await r.json();
+    if (!j.ports?.length) {
+      proxyStatusEl.textContent = 'Ничего не найдено. Запустите dev-сервер и попробуйте снова.';
+      proxyStatusEl.className = 'proxy-status err';
+      return;
+    }
+    proxyStatusEl.innerHTML = '';
+    const label = document.createElement('span');
+    label.textContent = 'Найдено: ';
+    proxyStatusEl.append(label);
+    j.ports.forEach((p, i) => {
+      if (i > 0) proxyStatusEl.append(document.createTextNode(', '));
+      const a = document.createElement('a');
+      a.href = '#';
+      a.textContent = `:${p.port}${p.hint ? ' (' + p.hint + ')' : ''}`;
+      a.onclick = (ev) => {
+        ev.preventDefault();
+        proxyPortInput.value = p.port;
+        btnCheckPort.click();
+      };
+      proxyStatusEl.append(a);
+    });
+    proxyStatusEl.className = 'proxy-status ok';
+  } catch (e) {
+    proxyStatusEl.textContent = 'Ошибка: ' + e.message;
+    proxyStatusEl.className = 'proxy-status err';
+  }
 };
 
 // --- Drag & Drop установка плагинов ---

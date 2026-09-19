@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 import unzipper from 'unzipper';
 
 // ─── Подавляем шум от untun при закрытии cloudflared ──────────
-// Ставим ДО app.whenReady, иначе Electron перехватит первым.
 const _origUnhandled = process.listeners('unhandledRejection').slice();
 process.removeAllListeners('unhandledRejection');
 process.on('unhandledRejection', (reason) => {
@@ -43,7 +42,7 @@ async function writeSettings(data) {
 ipcMain.handle('settings:get', readSettings);
 ipcMain.handle('settings:set', (_e, data) => writeSettings(data));
 
-// --- Drag & Drop установка плагина ---
+// --- Установка плагина из ZIP ---
 ipcMain.handle('plugin:install-zip', async (_e, zipPath) => {
   if (!srv) return { ok: false, error: 'Сервер не запущен' };
   try {
@@ -52,6 +51,21 @@ ipcMain.handle('plugin:install-zip', async (_e, zipPath) => {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+});
+
+// --- Выбор папки для static-комнаты ---
+ipcMain.handle('dialog:pick-directory', async () => {
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Выберите папку с HTML',
+    properties: ['openDirectory'],
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('shell:open-path', async (_e, p) => {
+  if (typeof p !== 'string') return false;
+  try { await shell.openPath(p); return true; } catch { return false; }
 });
 
 function loadTrayIcon() {
@@ -129,7 +143,7 @@ async function bootstrap() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
     },
   });
 

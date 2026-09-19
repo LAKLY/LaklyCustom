@@ -1,6 +1,6 @@
 {
   "name": "laklycustom",
-  "version": "0.6.0",
+  "version": "0.8.0",
   "description": "LaklyCustom — plugin-driven desktop host for local rooms",
   "main": "electron/main.js",
   "type": "module",
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "express": "^4.22.3",
+    "http-proxy": "^1.18.1",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.3",
     "untun": "^0.2.2",

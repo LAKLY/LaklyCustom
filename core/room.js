@@ -22,6 +22,13 @@ export class Room {
     this.publicUrl = null;
     this.activePluginName = pluginName;
     this.gameActive = false;
+
+    // Тип комнаты: 'default' | 'plugin' | 'static' | 'proxy'
+    this.type = pluginName ? 'plugin' : 'default';
+    // Для static-режима — путь к папке на диске
+    this.staticDir = null;
+    // Для proxy-режима — порт локального приложения
+    this.proxyPort = null;
   }
 
   channel() { return `room:${this.id}`; }
@@ -53,6 +60,7 @@ export class Room {
       roomName: this.name,
       activePlugin: this.activePluginName,
       gameActive: this.gameActive,
+      type: this.type,
     });
 
     this.broadcast(EVENTS.ROOM_UPDATED, this.publicPlayers());
@@ -114,7 +122,6 @@ export class Room {
   }
 
   async handleGameAction(socket, action, data) {
-    // Игра не запущена — не пропускаем действия
     if (!this.gameActive || !this.activePluginName) return;
     if (!this.pluginLoader.get(this.activePluginName)) return;
 
@@ -136,17 +143,12 @@ export class Room {
     if (!this.isActive) return;
     this.isActive = false;
 
-    // 1. Плагины могут разослать финальное сообщение, игроки ещё онлайн
     await this.pluginLoader.emit(EVENTS.ROOM_CLOSING, { room: this, reason });
-
-    // 2. Оповещаем клиентов
     this.broadcast(EVENTS.ROOM_CLOSED_NOTIFY, { reason });
 
-    // 3. Очищаем игроков и чат (до ROOM_CLOSED — как в docs)
     this.players.clear();
     this.messages = [];
 
-    // 4. Финальное закрытие + очистка plugin state
     await this.pluginLoader.emit(EVENTS.ROOM_CLOSED, { room: this, reason });
     await this.pluginLoader.emit(EVENTS.ROOM_DESTROYED, { roomId: this.id });
   }

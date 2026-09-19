@@ -1,3 +1,4 @@
+// core/room-manager.js
 import { Room } from './room.js';
 
 export class RoomManager {
@@ -8,7 +9,8 @@ export class RoomManager {
     this.socketRoom = new Map();
   }
 
-  async createRoom({ name, hostSocket, pluginName = null }) {
+  async createRoom({ name, hostSocket, pluginName = null, type = 'default',
+                     staticDir = null, proxyPort = null }) {
     for (const room of this.rooms.values()) {
       if (room.hostSocketId === hostSocket.id && room.isActive) {
         await room.close('replaced');
@@ -23,6 +25,10 @@ export class RoomManager {
       pluginLoader: this.pluginLoader,
       pluginName,
     });
+    room.type = type;
+    room.staticDir = staticDir;
+    room.proxyPort = proxyPort;
+
     this.rooms.set(room.id, room);
     this.socketRoom.set(hostSocket.id, room.id);
     hostSocket.join(room.channel());
@@ -36,6 +42,14 @@ export class RoomManager {
     return roomId ? this.rooms.get(roomId) : null;
   }
 
+  /** Найти активную комнату по типу (используется в proxy/static middleware) */
+  findActive(type) {
+    for (const room of this.rooms.values()) {
+      if (room.isActive && room.type === type) return room;
+    }
+    return null;
+  }
+
   bind(socketId, roomId) { this.socketRoom.set(socketId, roomId); }
   unbind(socketId) { this.socketRoom.delete(socketId); }
 
@@ -45,8 +59,6 @@ export class RoomManager {
     await room.close('closed');
     this.rooms.delete(roomId);
 
-    // Симметричная очистка: если у нас остались socket→room маппинги,
-    // указывающие на удалённую комнату, стираем их.
     for (const [sid, id] of this.socketRoom) {
       if (id === roomId) this.socketRoom.delete(sid);
     }

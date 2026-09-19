@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import QRCode from 'qrcode';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { RoomManager } from './room-manager.js';
 import { PluginLoader } from './plugin-loader.js';
@@ -17,13 +18,21 @@ import {
   validateGameAction,
 } from '../shared/validation.js';
 import { RateLimiter, RATE_LIMITS } from '../shared/rate-limit.js';
+import {
+  isPortOpen,
+  probePort,
+  scanPorts,
+  describePort,
+  createProxyServer,
+} from './proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
+const PROXY_CHECK_RATE = { max: 30, windowMs: 60_000 };
 
 function buildCorsOrigin() {
   return (origin, cb) => {
-    if (!origin) return cb(null, true); // same-origin / SSR
+    if (!origin) return cb(null, true);
     try {
       const u = new URL(origin);
       const host = u.hostname;
@@ -45,6 +54,8 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
   const httpServer = createServer(app);
   const io = new Server(httpServer, { cors: { origin: buildCorsOrigin() } });
 
+  app.use(express.json({ limit: '16kb' }));
+
   const pluginLoader = new PluginLoader(path.join(ROOT, 'plugins'));
   await pluginLoader.load();
 
@@ -53,18 +64,31 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
   let tunnelInstance = null;
   let publicUrl = null;
 
-  // Периодическая очистка rate-limit bucket'ов
   const pruneTimer = setInterval(() => limiter.prune(), 5 * 60 * 1000);
   pruneTimer.unref?.();
 
-  app.use('/host', express.static(path.join(ROOT, 'ui')));
-  for (const plugin of pluginLoader.plugins.values()) {
-    app.use(`/plugins/${plugin.id}`, express.static(plugin.publicDir));
-  }
-  app.use(express.static(path.join(ROOT, 'public')));
+  const noCache = { etag: false, lastModified: false, cacheControl: false };
+
+  // --- Единый proxy-сервер для HTTP + WS ---
+  const proxyServer = createProxyServer();
+
+  // --- Socket.IO уже навесил свой upgrade-listener на httpServer раньше нас.
+  // Наш добавляем вторым — он сработает, только если Socket.IO не обработал.
+  httpServer.on('upgrade', (req, socket, head) => {
+    if (typeof req.url !== 'string') return;
+    if (req.url.startsWith('/socket.io/')) return;
+
+    const proxyRoom = roomManager.findActive('proxy');
+    if (!proxyRoom || !proxyRoom.proxyPort) return;
+
+    const target = `http://127.0.0.1:${proxyRoom.proxyPort}`;
+    proxyServer.ws(req, socket, head, { target });
+  });
+
+  // --- Служебные маршруты (имеют приоритет над прокси) ---
 
   app.get('/api/room', (_req, res) => {
-    const first = [...roomManager.rooms.values()].find(r => r.isActive);
+    const first = roomManager.findActive();
     if (!first) return res.json({ isActive: false, players: [] });
     res.json({
       isActive: true,
@@ -72,6 +96,8 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
       publicUrl: first.publicUrl,
       gameActive: first.gameActive,
       activePlugin: first.activePluginName,
+      type: first.type,
+      proxyPort: first.proxyPort,
       ...first.publicPlayers(),
       messages: first.messages.slice(-50),
     });
@@ -81,15 +107,78 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
     res.json({ plugins: pluginLoader.list() });
   });
 
-    app.get('/api/qr', async (_req, res) => {
-      const first = [...roomManager.rooms.values()].find(r => r.isActive);
-      if (!first || !first.publicUrl) return res.status(400).json({ error: 'no room' });
-      try {
-        const qr = await QRCode.toDataURL(first.publicUrl, { margin: 1, width: 260 });
-        res.json({ qr });
-      } catch (e) { res.status(500).json({ error: e.message }); }
-    });
+  app.get('/api/qr', async (_req, res) => {
+    const first = roomManager.findActive();
+    if (!first || !first.publicUrl) return res.status(400).json({ error: 'no room' });
+    try {
+      const qr = await QRCode.toDataURL(first.publicUrl, { margin: 1, width: 260 });
+      res.json({ qr });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
 
+  // --- Проверка порта перед созданием комнаты ---
+  app.post('/api/proxy/check', async (req, res) => {
+    const ip = req.ip || 'unknown';
+    if (!limiter.check(`proxy-check:${ip}`, PROXY_CHECK_RATE)) {
+      return res.status(429).json({ ok: false, error: 'Слишком часто' });
+    }
+    const p = Number(req.body?.port);
+    if (!Number.isInteger(p) || p < 1 || p > 65535) {
+      return res.status(400).json({ ok: false, error: 'Некорректный порт' });
+    }
+    if (p === httpServer.address()?.port) {
+      return res.json({ ok: false, error: 'Это порт самого LaklyCustom' });
+    }
+    const open = await isPortOpen(p);
+    if (!open) return res.json({ ok: false, error: 'Порт закрыт' });
+    const probe = await probePort(p);
+    return res.json({ ok: true, port: p, hint: describePort(p), probe });
+  });
+
+  app.get('/api/proxy/scan', async (req, res) => {
+    const ip = req.ip || 'unknown';
+    if (!limiter.check(`proxy-scan:${ip}`, PROXY_CHECK_RATE)) {
+      return res.status(429).json({ error: 'Слишком часто' });
+    }
+    try {
+      const list = await scanPorts();
+      res.json({ ports: list });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // UI хоста и статика плагинов — идут до proxy/static middleware
+  app.use('/host', express.static(path.join(ROOT, 'ui'), noCache));
+  for (const plugin of pluginLoader.plugins.values()) {
+    app.use(`/plugins/${plugin.id}`, express.static(plugin.publicDir, noCache));
+  }
+
+  // --- PROXY MIDDLEWARE ---
+  // Если активна proxy-комната — все GET/POST/etc (кроме /socket.io/) идут в неё.
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/socket.io/')) return next();
+
+    const proxyRoom = roomManager.findActive('proxy');
+    if (!proxyRoom || !proxyRoom.proxyPort) return next();
+
+    const target = `http://127.0.0.1:${proxyRoom.proxyPort}`;
+    return proxyServer.web(req, res, { target });
+  });
+
+  // --- STATIC MIDDLEWARE ---
+  // Если активна static-комната — остальные запросы идут в её папку.
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') return next();
+
+    const staticRoom = roomManager.findActive('static');
+    if (!staticRoom || !staticRoom.staticDir) return next();
+
+    return express.static(staticRoom.staticDir, noCache)(req, res, next);
+  });
+
+  // --- Default статика (лобби) ---
+  app.use(express.static(path.join(ROOT, 'public'), noCache));
+
+  // --- Socket.IO ---
   io.on('connection', (socket) => {
     console.log('[io] connected', socket.id);
     const ip = socket.handshake.address || 'unknown';
@@ -101,14 +190,53 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
       }
 
       const name = validateRoomName(payload.roomName);
-      const pluginName = payload.pluginName ? validatePluginId(payload.pluginName) : null;
-      if (pluginName && !pluginLoader.get(pluginName)) {
-        socket.emit('error', 'Такого плагина нет');
-        return;
+      const requestedType = (payload.type === 'static' || payload.type === 'proxy')
+        ? payload.type
+        : 'default';
+
+      let staticDir = null;
+      let pluginName = null;
+      let proxyPort = null;
+
+      if (requestedType === 'static') {
+        if (typeof payload.staticDir !== 'string' || !payload.staticDir) {
+          socket.emit('error', 'Не выбрана папка для статики');
+          return;
+        }
+        try {
+          const st = await fs.stat(payload.staticDir);
+          if (!st.isDirectory()) throw new Error('not a directory');
+        } catch {
+          socket.emit('error', 'Папка не найдена');
+          return;
+        }
+        staticDir = payload.staticDir;
+      } else if (requestedType === 'proxy') {
+        const p = Number(payload.proxyPort);
+        if (!Number.isInteger(p) || p < 1 || p > 65535) {
+          socket.emit('error', 'Некорректный порт');
+          return;
+        }
+        if (p === httpServer.address()?.port) {
+          socket.emit('error', 'Нельзя проксировать собственный порт LaklyCustom');
+          return;
+        }
+        if (!(await isPortOpen(p))) {
+          socket.emit('error', `Порт ${p} закрыт — приложение не запущено?`);
+          return;
+        }
+        proxyPort = p;
+      } else {
+        pluginName = payload.pluginName ? validatePluginId(payload.pluginName) : null;
+        if (pluginName && !pluginLoader.get(pluginName)) {
+          socket.emit('error', 'Такого плагина нет');
+          return;
+        }
       }
 
       const room = await roomManager.createRoom({
         name, hostSocket: socket, pluginName,
+        type: requestedType, staticDir, proxyPort,
       });
 
       if (!publicUrl) {
@@ -116,7 +244,6 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
         tunnelInstance = t.instance;
         publicUrl = t.url;
       }
-      // URL с токеном — секретная ссылка для приглашения
       room.publicUrl = `${publicUrl}?t=${room.joinToken}`;
 
       socket.emit('host:room-created', {
@@ -125,6 +252,8 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
         publicUrl: room.publicUrl,
         provider: tunnelInstance?.name || 'local',
         activePlugin: room.activePluginName,
+        type: room.type,
+        proxyPort: room.proxyPort,
       });
       socket.emit(EVENTS.ROOM_UPDATED, room.publicPlayers());
       hooks.onRoomCreated?.();
@@ -134,11 +263,6 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
       const room = roomManager.getRoomBySocket(socket.id);
       if (!room || room.hostSocketId !== socket.id) return;
       await roomManager.destroyRoom(room.id);
-      if (tunnelInstance) {
-        await closeTunnel(tunnelInstance);
-        tunnelInstance = null;
-        publicUrl = null;
-      }
       hooks.onRoomClosed?.();
     });
 
@@ -166,10 +290,9 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
       const roomId = typeof payload.roomId === 'string' ? payload.roomId : null;
       const room = roomId
         ? roomManager.getRoom(roomId)
-        : [...roomManager.rooms.values()].find(r => r.isActive);
+        : roomManager.findActive();
       if (!room || !room.isActive) { socket.emit('error', 'Комната не активна'); return; }
 
-      // Проверка секретного токена из ссылки
       const token = typeof payload.token === 'string' ? payload.token : '';
       if (room.joinToken && token !== room.joinToken) {
         socket.emit('error', 'Ссылка недействительна');
@@ -227,11 +350,6 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
 
       if (room.hostSocketId === socket.id) {
         await roomManager.destroyRoom(room.id);
-        if (tunnelInstance) {
-          await closeTunnel(tunnelInstance);
-          tunnelInstance = null;
-          publicUrl = null;
-        }
         hooks.onRoomClosed?.();
       } else if (room.players.has(socket.id)) {
         const p = await room.removePlayer(socket.id);

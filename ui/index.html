@@ -37,6 +37,47 @@
         </div>
       </header>
 
+      <div class="card">
+        <h2>Режим комнаты</h2>
+        <div class="mode-switch">
+          <label class="mode-option">
+            <input type="radio" name="room-mode" value="default" checked>
+            <span>Плагин / чат</span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="room-mode" value="static">
+            <span>Раздать папку (Static)</span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="room-mode" value="proxy">
+            <span>Прокси порт (Dev)</span>
+          </label>
+        </div>
+
+        <div id="static-picker" style="display:none; margin-top:12px;">
+          <label>Папка с HTML</label>
+          <div class="share-row">
+            <input id="static-dir" readonly value="Папка не выбрана">
+            <button id="btn-pick-dir" class="btn btn-small">Выбрать…</button>
+          </div>
+          <p class="hint">index.html будет отдан гостям как главная страница. Остальные ресурсы (CSS, JS, картинки) — из той же папки.</p>
+        </div>
+
+        <div id="proxy-picker" style="display:none; margin-top:12px;">
+          <label>Порт локального приложения</label>
+          <div class="share-row">
+            <input id="proxy-port" type="number" min="1" max="65535" placeholder="5173" value="5173">
+            <button id="btn-check-port" class="btn btn-small">Проверить</button>
+            <button id="btn-scan-ports" class="btn btn-small">Найти запущенные</button>
+          </div>
+          <div id="proxy-status" class="proxy-status"></div>
+          <p class="hint">
+            Туннель будет проксировать <code>127.0.0.1:PORT</code>.
+            Vite — обычно 5173, Next — 3000/3001, Angular — 4200, Live Server — 5500, Django — 8000.
+          </p>
+        </div>
+      </div>
+
       <div class="room-layout" id="room-layout">
         <div class="room-left">
           <div class="card">
@@ -131,8 +172,9 @@
     <section class="view" data-view="about">
       <header class="view-header"><h1>О программе</h1></header>
       <div class="card">
-        <h2>LaklyCustom 0.5.0</h2>
+        <h2>LaklyCustom 0.8.0</h2>
         <p>Plugin-driven платформа для локальных комнат.</p>
+        <p>Режимы: чат с плагинами, статика из папки, проксирование локального порта.</p>
         <p>Публичная ссылка создаётся через Cloudflare Quick Tunnel — без токена.</p>
         <p style="margin-top:12px;color:var(--muted);font-size:12px;">
           Приложение продолжает работать в трее, даже когда окно закрыто.
