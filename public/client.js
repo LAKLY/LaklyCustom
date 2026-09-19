@@ -79,25 +79,21 @@ function hideGame() {
   $('game-frame').src = 'about:blank';
 }
 
-// Мост iframe ↔ родитель через postMessage
 window.addEventListener('message', (e) => {
-  if (!e.data || typeof e.data !== 'object') return;
   const frame = $('game-frame');
+  if (!frame?.contentWindow || e.source !== frame.contentWindow) return;
+  if (!e.data || typeof e.data !== 'object') return;
 
   if (e.data.type === 'lakly:ready') {
-    // iframe загрузился — отправляем ему инфо об игроке и последнее состояние
-    if (frame?.contentWindow) {
-      frame.contentWindow.postMessage({
-        type: 'lakly:init',
-        player: me,
-      }, '*');
-      if (lastGameState) {
-        frame.contentWindow.postMessage({ type: 'lakly:state', data: lastGameState }, '*');
-      }
+    frame.contentWindow.postMessage({ type: 'lakly:init', player: me }, '*');
+    if (lastGameState) {
+      frame.contentWindow.postMessage({ type: 'lakly:state', data: lastGameState }, '*');
     }
+    return;
   }
 
   if (e.data.type === 'lakly:action') {
+    if (typeof e.data.action !== 'string') return;
     socket.emit('game:action', { action: e.data.action, data: e.data.data });
   }
 });

@@ -1,3 +1,4 @@
+// core/server.js
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -8,25 +9,57 @@ import { RoomManager } from './room-manager.js';
 import { PluginLoader } from './plugin-loader.js';
 import { openTunnel, closeTunnel } from './tunnels/index.js';
 import { EVENTS } from '../shared/events.js';
+import {
+  validatePlayerName,
+  validateChatMessage,
+  validateRoomName,
+  validatePluginId,
+  validateGameAction,
+} from '../shared/validation.js';
+import { RateLimiter, RATE_LIMITS } from '../shared/rate-limit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
+function buildCorsOrigin() {
+  return (origin, cb) => {
+    if (!origin) return cb(null, true); // same-origin / SSR
+    try {
+      const u = new URL(origin);
+      const host = u.hostname;
+      if (
+        host === 'localhost' ||
+        host === '127.0.0.1' ||
+        host.endsWith('.trycloudflare.com') ||
+        host.endsWith('.ngrok-free.app') ||
+        host.endsWith('.ngrok.io') ||
+        host.endsWith('.ngrok-free.dev')
+      ) return cb(null, true);
+    } catch {}
+    cb(new Error('Origin not allowed'));
+  };
+}
+
 export async function startServer({ port = 3000, hooks = {} } = {}) {
   const app = express();
   const httpServer = createServer(app);
-  const io = new Server(httpServer, { cors: { origin: '*' } });
+  const io = new Server(httpServer, { cors: { origin: buildCorsOrigin() } });
 
   const pluginLoader = new PluginLoader(path.join(ROOT, 'plugins'));
   await pluginLoader.load();
 
   const roomManager = new RoomManager(io, pluginLoader);
+  const limiter = new RateLimiter();
   let tunnelInstance = null;
   let publicUrl = null;
 
+  // Периодическая очистка rate-limit bucket'ов
+  const pruneTimer = setInterval(() => limiter.prune(), 5 * 60 * 1000);
+  pruneTimer.unref?.();
+
   app.use('/host', express.static(path.join(ROOT, 'ui')));
   for (const plugin of pluginLoader.plugins.values()) {
-    app.use(`/plugins/${plugin.name}`, express.static(plugin.publicDir));
+    app.use(`/plugins/${plugin.id}`, express.static(plugin.publicDir));
   }
   app.use(express.static(path.join(ROOT, 'public')));
 
@@ -56,11 +89,25 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // --- IPC через сокет для drag&drop установки ---
   io.on('connection', (socket) => {
-    socket.on('host:create-room', async ({ roomName, pluginName } = {}) => {
+    console.log('[io] connected', socket.id);
+    const ip = socket.handshake.address || 'unknown';
+
+    socket.on('host:create-room', async (payload = {}) => {
+      if (!limiter.check(`create:${ip}`, RATE_LIMITS.CREATE_ROOM)) {
+        socket.emit('error', 'Слишком часто. Подождите минуту.');
+        return;
+      }
+
+      const name = validateRoomName(payload.roomName);
+      const pluginName = payload.pluginName ? validatePluginId(payload.pluginName) : null;
+      if (pluginName && !pluginLoader.get(pluginName)) {
+        socket.emit('error', 'Такого плагина нет');
+        return;
+      }
+
       const room = await roomManager.createRoom({
-        name: roomName, hostSocket: socket, pluginName,
+        name, hostSocket: socket, pluginName,
       });
 
       if (!publicUrl) {
@@ -78,7 +125,6 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
         activePlugin: room.activePluginName,
       });
       socket.emit(EVENTS.ROOM_UPDATED, room.publicPlayers());
-
       hooks.onRoomCreated?.();
     });
 
@@ -94,9 +140,12 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
       hooks.onRoomClosed?.();
     });
 
-    socket.on('host:kick-player', async ({ playerId } = {}) => {
+    socket.on('host:kick-player', async (payload = {}) => {
+      if (!limiter.check(`kick:${socket.id}`, RATE_LIMITS.KICK)) return;
       const room = roomManager.getRoomBySocket(socket.id);
       if (!room || room.hostSocketId !== socket.id) return;
+      const { playerId } = payload;
+      if (typeof playerId !== 'string') return;
       const sid = room.findSocketIdByPlayerId(playerId);
       if (!sid) return;
       io.to(sid).emit(EVENTS.PLAYER_KICKED_NOTIFY);
@@ -104,31 +153,42 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
       hooks.onPlayerLeave?.({ name: 'игрок' });
     });
 
-    socket.on('player:join', async ({ playerName, roomId } = {}) => {
+    socket.on('player:join', async (payload = {}) => {
+      if (!limiter.check(`join:${ip}`, RATE_LIMITS.JOIN)) {
+        socket.emit('error', 'Слишком много попыток входа');
+        return;
+      }
+      const name = validatePlayerName(payload.playerName);
+      if (!name) { socket.emit('error', 'Имя должно быть от 1 до 24 символов'); return; }
+
+      const roomId = typeof payload.roomId === 'string' ? payload.roomId : null;
       const room = roomId
         ? roomManager.getRoom(roomId)
         : [...roomManager.rooms.values()].find(r => r.isActive);
-      if (!room || !room.isActive) {
-        socket.emit('error', 'Комната не активна');
-        return;
-      }
+      if (!room || !room.isActive) { socket.emit('error', 'Комната не активна'); return; }
+
       roomManager.bind(socket.id, room.id);
-      const player = await room.addPlayer(socket, playerName);
+      const player = await room.addPlayer(socket, name);
       hooks.onPlayerJoin?.(player);
     });
 
-    socket.on('chat:message', ({ text } = {}) => {
+    socket.on('chat:message', (payload = {}) => {
+      if (!limiter.check(`chat:${socket.id}`, RATE_LIMITS.CHAT)) return;
       const room = roomManager.getRoomBySocket(socket.id);
-      if (!room || !text) return;
+      if (!room) return;
+      const text = validateChatMessage(payload.text);
+      if (!text) return;
       const p = room.players.get(socket.id);
       const isHost = socket.id === room.hostSocketId;
       if (!p && !isHost) return;
       room.addMessage(p?.name || 'Хост', p?.color || '#00F5FF', text);
     });
 
-    socket.on('host:start-game', async ({ pluginName } = {}) => {
+    socket.on('host:start-game', async (payload = {}) => {
       const room = roomManager.getRoomBySocket(socket.id);
       if (!room || room.hostSocketId !== socket.id) return;
+      const pluginName = validatePluginId(payload.pluginName);
+      if (!pluginName) return;
       await room.startGame(pluginName);
     });
 
@@ -138,13 +198,20 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
       await room.stopGame();
     });
 
-    socket.on('game:action', ({ action, data } = {}) => {
+    socket.on('game:action', (payload = {}) => {
+      if (!limiter.check(`action:${socket.id}`, RATE_LIMITS.ACTION)) return;
       const room = roomManager.getRoomBySocket(socket.id);
       if (!room) return;
+      const action = validateGameAction(payload.action);
+      if (!action) return;
+      const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
       room.handleGameAction(socket, action, data);
     });
 
     socket.on('disconnect', async () => {
+      limiter.reset(`chat:${socket.id}`);
+      limiter.reset(`action:${socket.id}`);
+      limiter.reset(`kick:${socket.id}`);
       const room = roomManager.getRoomBySocket(socket.id);
       roomManager.unbind(socket.id);
       if (!room) return;
@@ -172,6 +239,7 @@ export async function startServer({ port = 3000, hooks = {} } = {}) {
     io,
     plugins: pluginLoader,
     close: async () => {
+      clearInterval(pruneTimer);
       if (tunnelInstance) await closeTunnel(tunnelInstance);
       for (const room of roomManager.rooms.values()) await room.close('shutdown');
       await new Promise(res => httpServer.close(() => res()));

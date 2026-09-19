@@ -1,3 +1,4 @@
+// core/room.js
 import { v4 as uuidv4 } from 'uuid';
 import { EVENTS } from '../shared/events.js';
 
@@ -11,21 +12,21 @@ export class Room {
     this.pluginLoader = pluginLoader;
     this.hostSocketId = hostSocket.id;
 
+    // Токены доступа (не публикуем наружу)
+    this.joinToken = uuidv4();
+    this.hostToken = uuidv4();
+
     this.players = new Map();
     this.messages = [];
     this.isActive = true;
     this.startedAt = Date.now();
     this.publicUrl = null;
-
     this.activePluginName = pluginName;
     this.gameActive = false;
   }
 
   channel() { return `room:${this.id}`; }
-
-  broadcast(event, data) {
-    this.io.to(this.channel()).emit(event, data);
-  }
+  broadcast(event, data) { this.io.to(this.channel()).emit(event, data); }
 
   publicPlayers() {
     const list = [...this.players.values()].map(p => ({
@@ -38,7 +39,7 @@ export class Room {
   async addPlayer(socket, playerName) {
     const player = {
       id: uuidv4(),
-      name: (playerName || 'Гость').slice(0, 20),
+      name: playerName,
       color: COLORS[this.players.size % COLORS.length],
       isHost: false,
     };
@@ -58,10 +59,7 @@ export class Room {
     this.broadcast(EVENTS.ROOM_UPDATED, this.publicPlayers());
     this.broadcast('room:player-joined', { player });
 
-    await this.pluginLoader.emit(EVENTS.PLAYER_JOINED, {
-      room: this, socket, player,
-    });
-
+    await this.pluginLoader.emit(EVENTS.PLAYER_JOINED, { room: this, socket, player });
     return player;
   }
 
@@ -89,7 +87,7 @@ export class Room {
   addMessage(sender, color, text) {
     const msg = {
       id: uuidv4(), sender, senderColor: color,
-      text: String(text).slice(0, 500), ts: Date.now(),
+      text, ts: Date.now(),
     };
     this.messages.push(msg);
     if (this.messages.length > 200) this.messages.shift();
@@ -105,9 +103,7 @@ export class Room {
       plugin: pluginName,
       url: `/plugins/${pluginName}/game.html`,
     });
-    await this.pluginLoader.emit(EVENTS.GAME_START, {
-      room: this, plugin: pluginName,
-    });
+    await this.pluginLoader.emit(EVENTS.GAME_START, { room: this, plugin: pluginName });
     return true;
   }
 
@@ -115,9 +111,7 @@ export class Room {
     const name = this.activePluginName;
     this.gameActive = false;
     this.broadcast(EVENTS.GAME_STOPPED, { plugin: name });
-    if (name) {
-      await this.pluginLoader.emit(EVENTS.GAME_STOP, { room: this, plugin: name });
-    }
+    if (name) await this.pluginLoader.emit(EVENTS.GAME_STOP, { room: this, plugin: name });
   }
 
   async handleGameAction(socket, action, data) {
@@ -135,9 +129,20 @@ export class Room {
   }
 
   async close(reason = 'host') {
+    if (!this.isActive) return;
     this.isActive = false;
-    await this.pluginLoader.emit(EVENTS.ROOM_CLOSED, { room: this, reason });
+
+    // 1. Плагины получают шанс отправить последнее сообщение
+    await this.pluginLoader.emit(EVENTS.ROOM_CLOSING, { room: this, reason });
+
+    // 2. Оповещаем клиентов
     this.broadcast(EVENTS.ROOM_CLOSED_NOTIFY, { reason });
+
+    // 3. Финальное закрытие + очистка plugin state
+    await this.pluginLoader.emit(EVENTS.ROOM_CLOSED, { room: this, reason });
+    await this.pluginLoader.emit(EVENTS.ROOM_DESTROYED, { roomId: this.id });
+
     this.players.clear();
+    this.messages = [];
   }
 }

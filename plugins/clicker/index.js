@@ -1,11 +1,10 @@
+// plugins/clicker/index.js
 import { EVENTS } from '../../shared/events.js';
 
-const state = new Map();
+const state = new Map(); // roomId -> { count, scores: Map }
 
 function getState(roomId) {
-  if (!state.has(roomId)) {
-    state.set(roomId, { count: 0, scores: new Map() });
-  }
+  if (!state.has(roomId)) state.set(roomId, { count: 0, scores: new Map() });
   return state.get(roomId);
 }
 
@@ -26,8 +25,9 @@ export default {
       state.set(room.id, { count: 0, scores: new Map() });
     },
 
-    [EVENTS.ROOM_CLOSED]: ({ room }) => {
-      state.delete(room.id);
+    // Финальная очистка — гарантирует отсутствие утечек
+    [EVENTS.ROOM_DESTROYED]: ({ roomId }) => {
+      state.delete(roomId);
     },
 
     [EVENTS.GAME_START]: ({ room }) => {
@@ -49,7 +49,7 @@ export default {
       });
     },
 
-    [EVENTS.PLAYER_LEFT]: ({ room, player }) => {
+    [EVENTS.PLAYER_LEFT]: ({ room }) => {
       if (!room.gameActive) return;
       const s = getState(room.id);
       room.broadcast(EVENTS.GAME_STATE, {
@@ -62,13 +62,10 @@ export default {
       if (action !== 'click') return;
       const s = getState(room.id);
       s.count++;
-      const prev = s.scores.get(player.name) || 0;
-      s.scores.set(player.name, prev + 1);
-
+      s.scores.set(player.name, (s.scores.get(player.name) || 0) + 1);
       room.broadcast(EVENTS.GAME_STATE, {
         count: s.count,
         leaderboard: leaderboard(s),
-        lastClick: { name: player.name, color: player.color },
       });
     },
   },

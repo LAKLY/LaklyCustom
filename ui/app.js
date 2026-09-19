@@ -63,18 +63,43 @@ async function loadPlugins() {
   try {
     const r = await fetch('/api/plugins');
     const j = await r.json();
-    pluginSelect.innerHTML = '<option value="">— Без плагина (только чат) —</option>' +
-      j.plugins.map(p => `<option value="${p.name}">${p.name} — ${p.description || ''}</option>`).join('');
 
-    $('plugins-list').innerHTML = j.plugins.length
-      ? j.plugins.map(p => `
-          <div class="plugin-item">
-            <div class="plugin-name">${p.name}</div>
-            <div class="plugin-version">v${p.version}</div>
-            <div class="plugin-desc">${p.description || ''}</div>
-          </div>`).join('')
-      : '<div class="empty">Плагины не найдены. Перетащите ZIP-архив в окно.</div>';
+    // Селект — строим через DOM, чтобы не инжектить HTML из данных
+    pluginSelect.innerHTML = '';
+    pluginSelect.append(makeOption('', '— Без плагина (только чат) —'));
+    for (const p of j.plugins) {
+      pluginSelect.append(makeOption(p.id, `${p.name} — ${p.description || ''}`));
+    }
+
+    const listEl = $('plugins-list');
+    listEl.innerHTML = '';
+    if (!j.plugins.length) {
+      listEl.innerHTML = '<div class="empty">Плагины не найдены. Перетащите ZIP-архив в окно.</div>';
+      return;
+    }
+    for (const p of j.plugins) {
+      const item = document.createElement('div');
+      item.className = 'plugin-item';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'plugin-name';
+      nameEl.textContent = p.name;
+      const verEl = document.createElement('div');
+      verEl.className = 'plugin-version';
+      verEl.textContent = `v${p.version}`;
+      const descEl = document.createElement('div');
+      descEl.className = 'plugin-desc';
+      descEl.textContent = p.description || '';
+      item.append(nameEl, verEl, descEl);
+      listEl.append(item);
+    }
   } catch (e) { console.error(e); }
+}
+
+function makeOption(value, label) {
+  const opt = document.createElement('option');
+  opt.value = value;
+  opt.textContent = label;
+  return opt;
 }
 
 btnStart.onclick = () => {
@@ -92,7 +117,12 @@ btnStop.onclick = () => {
 
 btnJoinGuest.onclick = () => {
   const url = roomUrl.value;
-  if (url && url !== '—') window.open(url, '_blank');
+  if (!url || url === '—') return;
+  try {
+    const u = new URL(url);
+    if (!['http:', 'https:'].includes(u.protocol)) return;
+    window.open(u.toString(), '_blank', 'noopener,noreferrer');
+  } catch {}
 };
 
 btnCopy.onclick = () => {
@@ -175,7 +205,6 @@ socket.on('game:stopped', () => {
   updateGameControls();
 });
 
-// Пересылаем состояние игры в iframe
 socket.on('game:state', (data) => {
   lastGameState = data;
   if (gameFrame?.contentWindow) {
@@ -297,9 +326,23 @@ $('btn-save-settings').onclick = async () => {
   toast('Сохранено. Перезапустите приложение.');
 };
 
-window.addEventListener('load', () => {
-  loadSettings();
-  loadPlugins();
+window.addEventListener('message', (e) => {
+  // Принимаем только сообщения от собственного iframe
+  if (!gameFrame?.contentWindow || e.source !== gameFrame.contentWindow) return;
+  if (!e.data || typeof e.data !== 'object') return;
+
+  if (e.data.type === 'lakly:ready') {
+    gameFrame.contentWindow.postMessage({ type: 'lakly:init', player: meAsHost }, '*');
+    if (lastGameState) {
+      gameFrame.contentWindow.postMessage({ type: 'lakly:state', data: lastGameState }, '*');
+    }
+    return;
+  }
+
+  if (e.data.type === 'lakly:action') {
+    if (typeof e.data.action !== 'string') return;
+    socket.emit('game:action', { action: e.data.action, data: e.data.data });
+  }
 });
 
 // Drag & Drop установка плагинов

@@ -1,0 +1,8 @@
+{
+  "id": "clicker",
+  "name": "Clicker",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "index.js",
+  "description": "Общий счётчик кликов: все игроки наращивают счёт вместе."
+}
