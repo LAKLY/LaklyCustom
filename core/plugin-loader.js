@@ -19,27 +19,28 @@ const ALLOWED_EXT = new Set([
 ]);
 
 export class PluginLoader {
-  constructor(pluginsDir) {
+  constructor(pluginsDir, { pluginDataDir } = {}) {
     this.pluginsDir = pluginsDir;
-    this.plugins = new Map();   // id -> record
-    this.handlers = new Map();  // eventName -> [{ pluginName }]
+    this.pluginDataDir = pluginDataDir || path.join(pluginsDir, '_data');
+    this.plugins = new Map();
+    this.handlers = new Map();
     this.io = null;
     this.roomManager = null;
   }
 
-  /** Вызывается после создания RoomManager — тогда есть io */
   attachServer({ io, roomManager }) {
     this.io = io;
     this.roomManager = roomManager;
   }
 
   async load() {
-    // Останавливаем все текущие workers
     for (const [, rec] of this.plugins) {
       try { await rec.host?.unload?.(); } catch {}
     }
     this.plugins.clear();
     this.handlers.clear();
+
+    await fs.mkdir(this.pluginDataDir, { recursive: true }).catch(() => {});
 
     let entries = [];
     try {
@@ -53,11 +54,26 @@ export class PluginLoader {
       if (!entry.isDirectory()) continue;
       if (entry.name.startsWith('_install_')) continue;
       if (entry.name.startsWith('_backup_')) continue;
+      if (entry.name.startsWith('_data')) continue;
       await this._loadOne(entry.name);
     }
   }
 
   async reload() { await this.load(); }
+
+  async reloadOne(id) {
+    const rec = this.plugins.get(id);
+    if (!rec) return;
+    const dirName = path.basename(rec.dir);
+    try { await rec.host?.unload?.(); } catch {}
+    this.plugins.delete(id);
+    for (const [event, list] of this.handlers) {
+      const filtered = list.filter(h => h.pluginName !== id);
+      if (filtered.length === 0) this.handlers.delete(event);
+      else this.handlers.set(event, filtered);
+    }
+    await this._loadOne(dirName);
+  }
 
   async unloadAll() {
     for (const [id, rec] of this.plugins) {
@@ -72,7 +88,6 @@ export class PluginLoader {
     if (!rec) return;
     try { await rec.host?.unload?.(); } catch {}
     this.plugins.delete(pluginName);
-
     for (const [event, list] of this.handlers) {
       const filtered = list.filter(h => h.pluginName !== pluginName);
       if (filtered.length === 0) this.handlers.delete(event);
@@ -81,6 +96,35 @@ export class PluginLoader {
     await this.emit(EVENTS.PLUGIN_UNLOADED, { name: pluginName });
   }
 
+  // ─── Конфиг ─────────────────────────────────────────────────
+  async readConfig(id) {
+    const userPath = path.join(this.pluginDataDir, `${id}.json`);
+    try {
+      const raw = await fs.readFile(userPath, 'utf8');
+      return { config: JSON.parse(raw), isDefault: false };
+    } catch {}
+
+    const defPath = path.join(this.pluginsDir, id, 'config.json');
+    try {
+      const raw = await fs.readFile(defPath, 'utf8');
+      return { config: JSON.parse(raw), isDefault: true };
+    } catch {}
+
+    return { config: null, isDefault: true };
+  }
+
+  async saveConfig(id, config) {
+    await fs.mkdir(this.pluginDataDir, { recursive: true });
+    const userPath = path.join(this.pluginDataDir, `${id}.json`);
+    await fs.writeFile(userPath, JSON.stringify(config, null, 2));
+  }
+
+  async resetConfig(id) {
+    const userPath = path.join(this.pluginDataDir, `${id}.json`);
+    await fs.rm(userPath, { force: true }).catch(() => {});
+  }
+
+  // ─── Загрузка одного плагина ────────────────────────────────
   async _loadOne(dirName) {
     const dir = path.join(this.pluginsDir, dirName);
     const rawManifest = await this._readManifest(dir);
@@ -91,14 +135,11 @@ export class PluginLoader {
     }
 
     const entryPath = path.join(dir, manifest.entry);
-    try {
-      await fs.access(entryPath, fs.constants.R_OK);
-    } catch {
-      console.warn(`[plugins] ${dirName}: не найден ${manifest.entry}`);
-      return;
-    }
+    try { await fs.access(entryPath, fs.constants.R_OK); }
+    catch { console.warn(`[plugins] ${dirName}: не найден ${manifest.entry}`); return; }
 
     const entryUrl = pathToFileURL(entryPath).href;
+    const { config } = await this.readConfig(manifest.id);
 
     const host = new PluginHost({
       io: this.io,
@@ -108,7 +149,7 @@ export class PluginLoader {
 
     let loaded;
     try {
-      loaded = await host.start(entryUrl);
+      loaded = await host.start(entryUrl, config);
     } catch (err) {
       console.error(`[plugins] ${dirName}: ${err.message}`);
       return;
@@ -120,8 +161,8 @@ export class PluginLoader {
       version: loaded.version || manifest.version,
       description: loaded.description || manifest.description,
       apiVersion: manifest.apiVersion,
-      host,
-      dir,
+      hasConfig: !!config,
+      host, dir,
       publicDir: path.join(dir, 'public'),
       manifest,
     };
@@ -143,29 +184,21 @@ export class PluginLoader {
   _buildRoomState(roomId) {
     const room = this.roomManager?.getRoom(roomId);
     if (!room) return null;
-
     const players = [];
     for (const [socketId, p] of room.players) {
-      players.push({
-        id: p.id,
-        _socketId: socketId,
-        name: p.name,
-        color: p.color,
-        isHost: p.isHost,
-      });
+      players.push({ id: p.id, _socketId: socketId, name: p.name, color: p.color, isHost: p.isHost });
     }
     return {
       players,
       gameActive: !!room.gameActive,
+      isActive: !!room.isActive,
       activePluginName: room.activePluginName || null,
       hostSocketId: room.hostSocketId || null,
     };
   }
 
   cleanupRoom(roomId) {
-    for (const [, rec] of this.plugins) {
-      rec.host?.cleanupRoom?.(roomId);
-    }
+    for (const [, rec] of this.plugins) rec.host?.cleanupRoom?.(roomId);
   }
 
   async emit(event, payload) {
@@ -173,16 +206,10 @@ export class PluginLoader {
     for (const { pluginName } of list) {
       const rec = this.plugins.get(pluginName);
       if (!rec?.host) continue;
-
-      // Обновляем состояние комнаты в worker'е до вызова hook
       const roomId = payload?.room?.id || payload?.roomId;
       if (roomId) rec.host.updateRoomState(roomId);
-
-      try {
-        await rec.host.invoke(event, payload);
-      } catch (err) {
-        console.error(`[plugins] ${pluginName} → ${event}:`, err.message);
-      }
+      try { await rec.host.invoke(event, payload); }
+      catch (err) { console.error(`[plugins] ${pluginName} → ${event}:`, err.message); }
     }
   }
 
@@ -190,65 +217,44 @@ export class PluginLoader {
 
   list() {
     return [...this.plugins.values()].map(p => ({
-      id: p.id,
-      name: p.name,
-      version: p.version,
-      description: p.description,
-      apiVersion: p.apiVersion,
+      id: p.id, name: p.name, version: p.version,
+      description: p.description, apiVersion: p.apiVersion,
+      hasConfig: !!p.hasConfig,
     }));
   }
 
-  // --- Установка из ZIP (без изменений) ---
-
+  // ─── Установка из ZIP ───────────────────────────────────────
   async installFromZip(zipPath) {
     const stat = await fs.stat(zipPath);
     if (stat.size > MAX_ZIP_SIZE) {
       throw new Error(`Архив слишком большой (макс ${MAX_ZIP_SIZE / 1024 / 1024} MB)`);
     }
-
     const ts = Date.now();
     const tmpDir = path.join(this.pluginsDir, `_install_${ts}`);
     await fs.mkdir(tmpDir, { recursive: true });
-
-    let backupDir = null;
-    let finalDir = null;
-
+    let backupDir = null, finalDir = null;
     try {
       await this._safeExtract(zipPath, tmpDir);
-
       const pluginRoot = await this._findPluginRoot(tmpDir);
       if (!pluginRoot) throw new Error('В архиве не найден плагин (manifest.json или index.js)');
-
       const rawManifest = await this._readManifest(pluginRoot);
       const manifest = this._validateManifest(rawManifest, path.basename(pluginRoot));
       if (!manifest) throw new Error('Невалидный manifest.json');
-
       const entryPath = path.join(pluginRoot, manifest.entry);
-      try {
-        await fs.access(entryPath, fs.constants.R_OK);
-      } catch {
-        throw new Error(`Не найден файл плагина: ${manifest.entry}`);
-      }
-
+      try { await fs.access(entryPath, fs.constants.R_OK); }
+      catch { throw new Error(`Не найден файл плагина: ${manifest.entry}`); }
       finalDir = path.join(this.pluginsDir, manifest.id);
-
       try {
         await fs.access(finalDir);
         backupDir = path.join(this.pluginsDir, `_backup_${manifest.id}_${ts}`);
         await fs.rename(finalDir, backupDir);
-      } catch { /* не было старого */ }
-
-      if (pluginRoot === tmpDir) {
-        await fs.rename(tmpDir, finalDir);
-      } else {
+      } catch {}
+      if (pluginRoot === tmpDir) await fs.rename(tmpDir, finalDir);
+      else {
         await fs.rename(pluginRoot, finalDir);
         await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
       }
-
-      if (backupDir) {
-        await fs.rm(backupDir, { recursive: true, force: true }).catch(() => {});
-      }
-
+      if (backupDir) await fs.rm(backupDir, { recursive: true, force: true }).catch(() => {});
       await this.load();
       return manifest.id;
     } catch (err) {
@@ -266,9 +272,7 @@ export class PluginLoader {
   async _safeExtract(zipPath, destDir) {
     const directory = await unzipper.Open.file(zipPath);
     const root = path.resolve(destDir);
-    let totalSize = 0;
-    let fileCount = 0;
-
+    let totalSize = 0, fileCount = 0;
     for (const entry of directory.files) {
       const name = entry.path;
       if (name.includes('..') || path.isAbsolute(name)) {
@@ -280,9 +284,7 @@ export class PluginLoader {
       }
       if (entry.type === 'File') {
         const ext = path.extname(name).toLowerCase();
-        if (ext && !ALLOWED_EXT.has(ext)) {
-          throw new Error(`Недопустимое расширение: ${name}`);
-        }
+        if (ext && !ALLOWED_EXT.has(ext)) throw new Error(`Недопустимое расширение: ${name}`);
         fileCount++;
         if (fileCount > MAX_FILES) throw new Error('Слишком много файлов');
         totalSize += entry.uncompressedSize || 0;
@@ -300,7 +302,6 @@ export class PluginLoader {
     const entries = await fs.readdir(tmpDir, { withFileTypes: true });
     const rootFiles = entries.filter(e => e.isFile()).map(e => e.name);
     if (rootFiles.includes('manifest.json') || rootFiles.includes('index.js')) return tmpDir;
-
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const inner = await fs.readdir(path.join(tmpDir, entry.name));
@@ -323,36 +324,20 @@ export class PluginLoader {
       const id = this._sanitizeId(fallbackId);
       if (!id) return null;
       console.warn(`[plugins] ${fallbackId}: нет manifest.json — legacy режим`);
-      return {
-        id, name: id, version: '0.0.0',
-        description: '', apiVersion: SUPPORTED_API_VERSION, entry: 'index.js',
-      };
+      return { id, name: id, version: '0.0.0', description: '', apiVersion: SUPPORTED_API_VERSION, entry: 'index.js' };
     }
-
     const id = this._sanitizeId(raw.id || fallbackId);
     if (!id) return null;
-
     const apiVersion = Number.isInteger(raw.apiVersion) ? raw.apiVersion : SUPPORTED_API_VERSION;
     if (apiVersion !== SUPPORTED_API_VERSION) return null;
-
-    const version = typeof raw.version === 'string' && /^\d+\.\d+\.\d+/.test(raw.version)
-      ? raw.version
-      : '0.0.0';
-
-    const name = typeof raw.name === 'string' && raw.name.trim()
-      ? raw.name.trim().slice(0, 60)
-      : id;
-
-    const description = typeof raw.description === 'string'
-      ? raw.description.slice(0, 200)
-      : '';
-
+    const version = typeof raw.version === 'string' && /^\d+\.\d+\.\d+/.test(raw.version) ? raw.version : '0.0.0';
+    const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 60) : id;
+    const description = typeof raw.description === 'string' ? raw.description.slice(0, 200) : '';
     let entry = 'index.js';
     if (raw.entry !== undefined) {
       entry = this._validateEntry(raw.entry);
       if (!entry) return null;
     }
-
     return { id, name, version, description, apiVersion, entry };
   }
 

@@ -10,6 +10,6 @@ contextBridge.exposeInMainWorld('lakly', {
   getPathForFile: (file) => {
     try { return webUtils.getPathForFile(file); } catch { return null; }
   },
-  onTrayCloseRoom: (cb) => ipcRenderer.on('tray:close-room', cb),
-  onTrayCreateRoom: (cb) => ipcRenderer.on('tray:create-room', cb),
+  // Единый канал трея: 'create-room' | 'close-room' | 'copy-link' | 'open-guest'
+  onTrayAction: (cb) => ipcRenderer.on('tray:action', (_e, action) => cb(action)),
 });

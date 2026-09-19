@@ -8,19 +8,12 @@ const WORKER_PATH = path.join(__dirname, 'plugin-worker.js');
 
 const HOOK_TIMEOUT_MS = 5000;
 
-// Лимиты ресурсов worker'а. 128+32 МБ — с запасом для игровой логики.
 const WORKER_RESOURCE_LIMITS = {
   maxOldGenerationSizeMb: 128,
   maxYoungGenerationSizeMb: 32,
 };
 
 export class PluginHost {
-  /**
-   * @param {object} deps
-   * @param {import('socket.io').Server} deps.io
-   * @param {(roomId: string) => object | null} deps.getRoom
-   * @param {(roomId: string) => object | null} deps.getRoomState
-   */
   constructor({ io, getRoom, getRoomState }) {
     this.io = io;
     this.getRoom = getRoom;
@@ -28,7 +21,7 @@ export class PluginHost {
 
     this.worker = null;
     this.loaded = false;
-    this.pending = new Map(); // requestId -> { resolve, reject, timer }
+    this.pending = new Map();
     this.nextRequestId = 1;
 
     this._readyResolve = null;
@@ -36,9 +29,8 @@ export class PluginHost {
     this._unloadResolve = null;
   }
 
-  async start(entryUrl) {
+  async start(entryUrl, config = null) {
     this.worker = new Worker(WORKER_PATH, { resourceLimits: WORKER_RESOURCE_LIMITS });
-    // Не держим event loop живым только из-за воркера — важно для тестов.
     this.worker.unref();
 
     this.worker.on('message', (msg) => this._onMessage(msg));
@@ -58,15 +50,13 @@ export class PluginHost {
 
     const loaded = await new Promise((resolve) => {
       this._loadResolve = resolve;
-      this.worker.postMessage({ type: 'load', entryUrl });
+      // ─── ПЕРЕДАЁМ CONFIG ──────────────────────────────────
+      this.worker.postMessage({ type: 'load', entryUrl, config });
     });
 
     if (!loaded.ok) throw new Error(loaded.error || 'plugin load failed');
     this.loaded = true;
 
-    // Гарантированно отпускаем event loop main-процесса.
-    // Первый unref() был сразу после new Worker(), но .on('message')
-    // мог его случайно снова задёрнуть — важно для тестового раннера.
     try { this.worker.unref(); } catch {}
 
     return {
@@ -90,8 +80,6 @@ export class PluginHost {
 
     try { w.postMessage({ type: 'shutdown' }); } catch {}
 
-    // Форсированно убиваем worker, если он не завершится за 500 мс.
-    // unref() — чтобы этот таймер не держал event loop.
     setTimeout(() => {
       try { w.terminate(); } catch {}
     }, 500).unref();
@@ -148,13 +136,9 @@ export class PluginHost {
     const out = {};
     for (const [k, v] of Object.entries(payload || {})) {
       if (k === 'io' || k === 'pluginLoader') continue;
-      if (k === 'room') {
-        out.room = { id: v?.id || null };
-      } else if (k === 'socket') {
-        out.socket = { id: v?.id || null };
-      } else {
-        out[k] = v;
-      }
+      if (k === 'room') out.room = { id: v?.id || null };
+      else if (k === 'socket') out.socket = { id: v?.id || null };
+      else out[k] = v;
     }
     return out;
   }

@@ -28,6 +28,7 @@ export class Room {
     this.type = pluginName ? 'plugin' : 'default';
     this.staticDir = null;
     this.proxyPort = null;
+    this.options = {};   // ← новое: настройки режима
   }
 
   channel() { return `room:${this.id}`; }

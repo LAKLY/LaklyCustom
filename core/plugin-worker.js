@@ -2,19 +2,19 @@
 import { parentPort } from 'node:worker_threads';
 
 let plugin = null;
-const roomEntries = new Map(); // roomId -> { proxy, state }
+const roomEntries = new Map();
 
 function send(msg) {
   parentPort.postMessage(msg);
 }
 
-/** Собрать/обновить состояние комнаты — то, что видят плагины */
 function applyRoomState(roomId, roomState) {
   if (!roomState) return;
   const entry = ensureRoomEntry(roomId);
   const s = entry.state;
   s.players = Array.isArray(roomState.players) ? roomState.players : [];
   s.gameActive = !!roomState.gameActive;
+  s.isActive = !!roomState.isActive;
   s.activePluginName = roomState.activePluginName || null;
   s.hostSocketId = roomState.hostSocketId || null;
 }
@@ -27,6 +27,7 @@ function ensureRoomEntry(roomId) {
     id: roomId,
     players: [],
     gameActive: false,
+    isActive: true,
     activePluginName: null,
     hostSocketId: null,
   };
@@ -34,20 +35,15 @@ function ensureRoomEntry(roomId) {
   const proxy = {
     get id() { return state.id; },
     get gameActive() { return state.gameActive; },
+    get isActive() { return state.isActive; },
     get activePluginName() { return state.activePluginName; },
     get hostSocketId() { return state.hostSocketId; },
-
-    /**
-     * Плагин привык к Map<socketId, player> — отдаём такой же интерфейс.
-     * Итерируется по нему так же, как по настоящему Map.
-     */
     get players() {
       const m = new Map();
       for (const p of state.players) m.set(p._socketId || p.id, p);
       return m;
     },
     get playerCount() { return state.players.length; },
-
     broadcast(event, data) {
       send({ type: 'broadcast', roomId, event, data });
     },
@@ -64,14 +60,11 @@ function ensureRoomEntry(roomId) {
   return entry;
 }
 
-/** Превратить payload из main-процесса в то, что увидит хук */
 function buildHookArgs(rawArgs, roomId) {
   const out = {};
-
   for (const [key, value] of Object.entries(rawArgs || {})) {
-    if (key === 'room') {
-      out.room = ensureRoomEntry(roomId).proxy;
-    } else if (key === 'socket') {
+    if (key === 'room') out.room = ensureRoomEntry(roomId).proxy;
+    else if (key === 'socket') {
       const sid = value?.id;
       out.socket = {
         id: sid,
@@ -81,13 +74,11 @@ function buildHookArgs(rawArgs, roomId) {
         },
       };
     } else if (key === 'io' || key === 'pluginLoader') {
-      // никогда не пробрасываем наружу
       continue;
     } else {
       out[key] = value;
     }
   }
-
   return out;
 }
 
@@ -101,6 +92,16 @@ parentPort.on('message', async (msg) => {
           send({ type: 'loaded', ok: false, error: 'нет default export' });
           return;
         }
+
+        // ─── ПЕРЕДАЁМ КОНФИГ ПЛАГИНУ ─────────────────────────
+        if (typeof plugin.onConfig === 'function') {
+          try {
+            await plugin.onConfig(msg.config || null);
+          } catch (err) {
+            console.error('[plugin-worker] onConfig error:', err.message);
+          }
+        }
+
         const hookNames = Object.keys(plugin.hooks || {}).filter(
           k => typeof plugin.hooks[k] === 'function'
         );

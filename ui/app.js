@@ -3,19 +3,24 @@ const socket = io();
 const $ = id => document.getElementById(id);
 
 // ═══════════ НАВИГАЦИЯ ═══════════
+function switchView(name) {
+  document.querySelectorAll('.nav-item').forEach(b => {
+    b.classList.toggle('active', b.dataset.view === name);
+  });
+  document.querySelectorAll('.view').forEach(v => {
+    v.classList.toggle('active', v.dataset.view === name);
+  });
+}
 document.querySelectorAll('.nav-item').forEach(btn => {
-  btn.onclick = () => {
-    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    btn.classList.add('active');
-    document.querySelector(`.view[data-view="${btn.dataset.view}"]`).classList.add('active');
-  };
+  btn.onclick = () => switchView(btn.dataset.view);
 });
 
-// ═══════════ ССЫЛКИ НА DOM ═══════════
+// ═══════════ ССЫЛКИ ═══════════
 const statusDot     = $('status-dot');
 const statusText    = $('status-text');
 const btnStart      = $('btn-start');
+const btnStartStatic = $('btn-start-static');
+const btnStartProxy = $('btn-start-proxy');
 const btnStop       = $('btn-stop');
 const btnJoinGuest  = $('btn-join-guest');
 const btnCopy       = $('btn-copy');
@@ -46,17 +51,31 @@ const errorTitle    = $('error-title');
 const errorMessage  = $('error-message');
 const errorClose    = $('error-close');
 
-const advancedToggle = $('btn-advanced-toggle');
-const advancedPanel  = $('advanced-panel');
-const modeRadios     = document.querySelectorAll('input[name="room-mode"]');
-const staticPicker   = $('static-picker');
+const configModal   = $('config-modal');
+const configTitle   = $('config-title');
+const configHint    = $('config-hint');
+const configTextarea = $('config-textarea');
+const configError   = $('config-error');
+const configSave    = $('config-save');
+const configCancel  = $('config-cancel');
+const configReset   = $('config-reset');
+
+const modeTabs      = document.querySelectorAll('.mode-tab');
+const panelDefault  = $('panel-default');
+const panelStatic   = $('panel-static');
+const panelProxy    = $('panel-proxy');
 const staticDirInput = $('static-dir');
-const btnPickDir     = $('btn-pick-dir');
-const proxyPicker    = $('proxy-picker');
+const btnPickDir    = $('btn-pick-dir');
 const proxyPortInput = $('proxy-port');
-const btnCheckPort   = $('btn-check-port');
-const btnScanPorts   = $('btn-scan-ports');
-const proxyStatusEl  = $('proxy-status');
+const btnCheckPort  = $('btn-check-port');
+const btnScanPorts  = $('btn-scan-ports');
+const proxyStatusEl = $('proxy-status');
+
+const roomContentDefault = $('room-content-default');
+const roomContentStatic  = $('room-content-static');
+const roomContentProxy   = $('room-content-proxy');
+const roomBadge     = $('room-badge');
+const roomHeroTitle = $('room-hero-title');
 
 const nikaNotify     = $('nika-notify');
 const nikaMessage    = $('nika-message');
@@ -68,8 +87,13 @@ let activePluginName = null;
 let lastGameState = null;
 let settings = { hasSeenWelcome: false };
 let nikaTimer = null;
+let pluginsCache = [];
+let roomActiveFlag = false;
+let editingPluginId = null;
+let currentMode = 'default';
+let currentRoomInfo = null;
 
-// ═══════════ NIKA ASSISTANT ═══════════
+// ═══════════ NIKA ═══════════
 const NIKA_IMAGES = {
   welcome: 'nika-welcome.png',
   idle:    'nika-idle.png',
@@ -77,24 +101,16 @@ const NIKA_IMAGES = {
   alert:   'nika-alert.png',
   sleep:   'nika-sleep.png',
 };
-
 function showNika(state, message, durationMs = 5000) {
   const file = NIKA_IMAGES[state] || NIKA_IMAGES.idle;
   nikaImg.src = `/assets/nika/${file}`;
   nikaMessage.innerHTML = message;
   nikaNotify.classList.add('show');
   clearTimeout(nikaTimer);
-  if (durationMs > 0) {
-    nikaTimer = setTimeout(() => nikaNotify.classList.remove('show'), durationMs);
-  }
+  if (durationMs > 0) nikaTimer = setTimeout(() => nikaNotify.classList.remove('show'), durationMs);
 }
 
-function hideNika() {
-  clearTimeout(nikaTimer);
-  nikaNotify.classList.remove('show');
-}
-
-// ═══════════ TOAST ═══════════
+// ═══════════ TOAST / MODAL / LOADING ═══════════
 function toast(text) {
   const el = $('toast');
   el.textContent = text;
@@ -102,8 +118,6 @@ function toast(text) {
   clearTimeout(el._t);
   el._t = setTimeout(() => el.classList.remove('show'), 2600);
 }
-
-// ═══════════ MODAL ═══════════
 function showError(title, message) {
   errorTitle.textContent = title || 'Не получилось';
   errorMessage.textContent = message || 'Что-то пошло не так.';
@@ -111,14 +125,11 @@ function showError(title, message) {
 }
 errorClose.onclick = () => { errorModal.hidden = true; };
 
-// ═══════════ LOADING ═══════════
 function showLoading(text) {
   loadingText.textContent = text || 'Открываем комнату…';
   loadingOverlay.hidden = false;
 }
-function hideLoading() {
-  loadingOverlay.hidden = true;
-}
+function hideLoading() { loadingOverlay.hidden = true; }
 
 // ═══════════ WELCOME ═══════════
 async function checkFirstRun() {
@@ -132,7 +143,6 @@ async function checkFirstRun() {
     if (!settings.hasSeenWelcome) welcomeScreen.hidden = false;
   } catch (err) { console.error('[welcome]', err); }
 }
-
 async function markWelcomeSeen() {
   settings.hasSeenWelcome = true;
   if (window.lakly?.setSettings) {
@@ -142,34 +152,32 @@ async function markWelcomeSeen() {
     localStorage.setItem('hasSeenWelcome', '1');
   }
 }
-
 $('btn-welcome-create').onclick = async () => {
   welcomeScreen.hidden = true;
   await markWelcomeSeen();
   createRoom();
 };
-
 $('btn-welcome-skip').onclick = async () => {
   welcomeScreen.hidden = true;
   await markWelcomeSeen();
   showNika('idle', 'Готов, когда ты готов', 4000);
 };
 
-// ═══════════ ADVANCED PANEL ═══════════
-advancedToggle.onclick = () => {
-  const isOpen = !advancedPanel.hidden;
-  advancedPanel.hidden = isOpen;
-  advancedToggle.textContent = isOpen ? 'Расширенные режимы' : 'Свернуть';
-};
+// ═══════════ MODE TABS ═══════════
+function setMode(mode) {
+  if (!['default', 'static', 'proxy'].includes(mode)) mode = 'default';
+  currentMode = mode;
 
-modeRadios.forEach(r => {
-  r.addEventListener('change', () => {
-    const mode = document.querySelector('input[name="room-mode"]:checked')?.value;
-    staticPicker.hidden = mode !== 'static';
-    proxyPicker.hidden = mode !== 'proxy';
-  });
+  modeTabs.forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+  panelDefault.hidden = mode !== 'default';
+  panelStatic.hidden  = mode !== 'static';
+  panelProxy.hidden   = mode !== 'proxy';
+}
+modeTabs.forEach(tab => {
+  tab.onclick = () => setMode(tab.dataset.mode);
 });
 
+// ═══════════ STATIC PICKER ═══════════
 btnPickDir.onclick = async () => {
   if (!window.lakly?.pickDirectory) { toast('Диалог недоступен'); return; }
   const dir = await window.lakly.pickDirectory();
@@ -188,8 +196,7 @@ btnCheckPort.onclick = async () => {
   proxyStatusEl.style.color = 'var(--text-3)';
   try {
     const r = await fetch('/api/proxy/check', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ port }),
     });
     const j = await r.json();
@@ -209,7 +216,6 @@ btnCheckPort.onclick = async () => {
     proxyStatusEl.style.color = 'var(--danger)';
   }
 };
-
 btnScanPorts.onclick = async () => {
   proxyStatusEl.textContent = 'Сканируем…';
   proxyStatusEl.style.color = 'var(--text-3)';
@@ -228,10 +234,8 @@ btnScanPorts.onclick = async () => {
     j.ports.forEach((p, i) => {
       if (i > 0) proxyStatusEl.append(document.createTextNode(', '));
       const a = document.createElement('a');
-      a.href = '#';
-      a.style.color = 'var(--live)';
-      a.style.textDecoration = 'underline';
-      a.style.cursor = 'pointer';
+      a.href = '#'; a.style.color = 'var(--live)';
+      a.style.textDecoration = 'underline'; a.style.cursor = 'pointer';
       a.textContent = `:${p.port}${p.hint ? ' (' + p.hint + ')' : ''}`;
       a.onclick = (ev) => {
         ev.preventDefault();
@@ -249,40 +253,59 @@ btnScanPorts.onclick = async () => {
 
 // ═══════════ CREATE ROOM ═══════════
 function createRoom() {
-  const mode = document.querySelector('input[name="room-mode"]:checked')?.value || 'default';
+  if (roomActiveFlag) return;
 
-  if (mode === 'static') {
+  if (currentMode === 'static') {
     const dir = staticDirInput.value;
     if (!dir || dir === 'Папка не выбрана') { toast('Сначала выберите папку'); return; }
-    btnStart.disabled = true;
+    const name = ($('room-name-static')?.value || 'Мой сайт').trim() || 'Мой сайт';
+    const options = {
+      spaFallback: $('opt-static-spa').checked,
+      dotFiles:    $('opt-static-dotfiles').checked,
+      noCache:     $('opt-static-nocache').checked,
+    };
+    setStartBtns(true);
     showLoading('Открываем комнату…');
-    socket.emit('host:create-room', { roomName: 'Lakly Room', type: 'static', staticDir: dir });
+    socket.emit('host:create-room', { roomName: name, type: 'static', staticDir: dir, options });
     return;
   }
 
-  if (mode === 'proxy') {
+  if (currentMode === 'proxy') {
     const port = Number(proxyPortInput.value);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       toast('Введите порт от 1 до 65535'); return;
     }
-    btnStart.disabled = true;
+    const name = ($('room-name-proxy')?.value || 'Dev Preview').trim() || 'Dev Preview';
+    const options = {
+      ws:           $('opt-proxy-ws').checked,
+      changeOrigin: $('opt-proxy-origin').checked,
+      insecure:     $('opt-proxy-insecure').checked,
+      timeoutSec:   Number($('opt-proxy-timeout').value) || 20,
+    };
+    setStartBtns(true);
     showLoading('Открываем комнату…');
-    socket.emit('host:create-room', { roomName: 'Lakly Room', type: 'proxy', proxyPort: port });
+    socket.emit('host:create-room', { roomName: name, type: 'proxy', proxyPort: port, options });
     return;
   }
 
-  btnStart.disabled = true;
+  // default
+  const name = ($('room-name-default')?.value || 'Lakly Room').trim() || 'Lakly Room';
+  setStartBtns(true);
   showLoading('Открываем комнату…');
   const pluginName = pluginSelect.value || null;
-  socket.emit('host:create-room', { roomName: 'Lakly Room', type: 'default', pluginName });
+  socket.emit('host:create-room', { roomName: name, type: 'default', pluginName });
 }
-
+function setStartBtns(disabled) {
+  btnStart.disabled = disabled;
+  btnStartStatic.disabled = disabled;
+  btnStartProxy.disabled = disabled;
+}
 btnStart.onclick = createRoom;
+btnStartStatic.onclick = createRoom;
+btnStartProxy.onclick = createRoom;
 
 btnStop.onclick = () => {
-  if (confirm('Закрыть комнату? Гости отключатся.')) {
-    socket.emit('host:close-room');
-  }
+  if (confirm('Закрыть комнату? Гости отключатся.')) socket.emit('host:close-room');
 };
 
 btnJoinGuest.onclick = () => {
@@ -301,10 +324,8 @@ btnCopy.onclick = () => {
     .catch(() => toast('Не удалось скопировать'));
 };
 
+// ═══════════ GAME CONTROLS ═══════════
 btnGameStart.onclick = () => {
-  // Берём выбор из селекта, а не из activePluginName.
-  // activePluginName = null, когда комната создана без плагина,
-  // но пользователь уже выбрал игру в селекте — её и надо запускать.
   const pluginName = pluginSelect.value;
   if (!pluginName) { toast('Выберите игру'); return; }
   socket.emit('host:start-game', { pluginName });
@@ -326,6 +347,8 @@ socket.on('host:room-created', async (data) => {
   statusDot.classList.add('on');
   const isPublic = data.provider !== 'local';
   statusText.textContent = isPublic ? 'Комната активна' : 'Только локально';
+  roomActiveFlag = true;
+  currentRoomInfo = data;
 
   roomUrl.value = data.publicUrl;
   roomEmpty.hidden = true;
@@ -334,36 +357,8 @@ socket.on('host:room-created', async (data) => {
   btnCopy.disabled = false;
   btnStop.disabled = false;
   btnJoinGuest.disabled = false;
-  btnSend.disabled = false;
-  chatInput.disabled = false;
 
-  gameFrameWrap.hidden = true;
-  gameFrame.src = 'about:blank';
-
-  if (data.type === 'static') {
-    gameStatus.textContent = 'Static-режим';
-    pluginSelect.disabled = true;
-    btnGameStart.disabled = true;
-    btnGameStop.hidden = true;
-  } else if (data.type === 'proxy') {
-    gameStatus.textContent = `Прокси → :${data.proxyPort || '?'}`;
-    pluginSelect.disabled = true;
-    btnGameStart.disabled = true;
-    btnGameStop.hidden = true;
-  } else {
-    gameStatus.textContent = 'Не запущена';
-    pluginSelect.disabled = false;
-
-    // Если при создании был выбран плагин — отразим это в селекте,
-    // чтобы пользователь видел какую игру запускать.
-    if (data.activePlugin) {
-      activePluginName = data.activePlugin;
-      pluginSelect.value = data.activePlugin;
-    } else {
-      activePluginName = null;
-    }
-    updateGameControls();
-  }
+  applyRoomModeUi(data);
 
   try {
     const r = await fetch('/api/qr');
@@ -375,66 +370,108 @@ socket.on('host:room-created', async (data) => {
     navigator.clipboard.writeText(data.publicUrl).catch(() => {});
     toast('Ссылка скопирована');
   }
-
   showNika('working', isPublic
     ? 'Комната открыта! Отправь друзьям ссылку'
     : 'Комната работает только локально', 5500);
+
+  renderPluginsGrid();
 });
+
+function applyRoomModeUi(data) {
+  const type = data.type || 'default';
+
+  roomContentDefault.hidden = type !== 'default';
+  roomContentStatic.hidden  = type !== 'static';
+  roomContentProxy.hidden   = type !== 'proxy';
+
+  if (type === 'default') {
+    roomBadge.textContent = 'Лобби и чат';
+    roomHeroTitle.textContent = 'Отправьте ссылку друзьям';
+    btnSend.disabled = false;
+    chatInput.disabled = false;
+  } else if (type === 'static') {
+    roomBadge.textContent = 'Раздача папки';
+    roomHeroTitle.textContent = 'Отправьте ссылку друзьям — они увидят ваш сайт';
+    btnSend.disabled = true;
+    chatInput.disabled = true;
+  } else if (type === 'proxy') {
+    roomBadge.textContent = 'Прокси';
+    roomHeroTitle.textContent = 'Отправьте ссылку — они увидят ваш localhost';
+    btnSend.disabled = true;
+    chatInput.disabled = true;
+  }
+
+  // Детали static
+  if (type === 'static') {
+    const opts = data.options || {};
+    $('static-path-display').textContent = data.staticDir || '—';
+    $('static-spa-display').textContent = opts.spaFallback ? 'Включено' : 'Выключено';
+    $('static-cache-display').textContent = opts.noCache ? 'Отключено' : 'Включено';
+    $('static-dotfiles-display').textContent = opts.dotFiles ? 'Отдаются' : 'Скрыты';
+  }
+
+  // Детали proxy
+  if (type === 'proxy') {
+    const opts = data.options || {};
+    $('proxy-target-display').textContent = `http://127.0.0.1:${data.proxyPort || '?'}`;
+    $('proxy-ws-display').textContent = opts.ws !== false ? 'Включено' : 'Выключено';
+    $('proxy-origin-display').textContent = opts.changeOrigin !== false ? 'Да' : 'Нет';
+    $('proxy-timeout-display').textContent = `${opts.timeoutSec || 20} сек`;
+  }
+}
+
 socket.on('room:closed', () => {
   resetUi();
   showNika('idle', 'Комната закрыта', 4000);
 });
+socket.on('room:updated', ({ players }) => {
+  const count = (players || []).length - 1; // без хоста
+  const label = count === 1 ? 'гость' : count < 5 ? 'гостя' : 'гостей';
 
-socket.on('room:updated', ({ players }) => renderPlayers(players));
+  if (currentRoomInfo?.type === 'static') {
+    $('static-visitors').textContent = `${count} ${label}`;
+  } else if (currentRoomInfo?.type === 'proxy') {
+    $('proxy-visitors').textContent = `${count} ${label}`;
+  }
+  renderPlayers(players);
+});
 socket.on('room:player-joined', refreshPlayers);
 socket.on('room:player-left', refreshPlayers);
-
 socket.on('chat:new-message', (msg) => {
   messages.push(msg);
   if (messages.length > 200) messages.shift();
   renderChat();
 });
-
 socket.on('game:started', ({ plugin, url }) => {
   activePluginName = plugin;
   gameStatus.textContent = `Игра: ${plugin}`;
   gameFrame.src = url;
   gameFrameWrap.hidden = false;
   lastGameState = null;
-
-  // Синхронизируем селект — на случай, если игра запущена программно
-  // или хост выбрал её в другом окне.
-  if (pluginSelect.value !== plugin) {
-    pluginSelect.value = plugin;
-  }
-
+  if (pluginSelect.value !== plugin) pluginSelect.value = plugin;
   updateGameControls();
+  renderPluginsGrid();
 });
-
 socket.on('game:stopped', () => {
   gameFrameWrap.hidden = true;
   gameFrame.src = 'about:blank';
   gameStatus.textContent = 'Не запущена';
   lastGameState = null;
   activePluginName = null;
-  // Не сбрасываем pluginSelect.value — пусть пользователь видит,
-  // какую игру он может перезапустить одним кликом.
   updateGameControls();
+  renderPluginsGrid();
 });
-
 socket.on('game:state', (data) => {
   lastGameState = data;
   if (gameFrame?.contentWindow) {
     gameFrame.contentWindow.postMessage({ type: 'lakly:state', data }, '*');
   }
 });
-
 socket.on('error', (msg) => {
   hideLoading();
-  btnStart.disabled = false;
+  setStartBtns(false);
   showError('Не получилось', typeof msg === 'string' ? msg : 'Что-то пошло не так.');
 });
-
 socket.on('disconnect', () => {
   statusDot.classList.remove('on');
   statusText.textContent = 'Нет связи';
@@ -445,15 +482,16 @@ socket.on('disconnect', () => {
 window.addEventListener('message', (e) => {
   if (!gameFrame?.contentWindow || e.source !== gameFrame.contentWindow) return;
   if (!e.data || typeof e.data !== 'object') return;
-
   if (e.data.type === 'lakly:ready') {
-    gameFrame.contentWindow.postMessage({ type: 'lakly:init', player: { playerId: 'host', playerName: 'Хост', playerColor: '#E5384F' } }, '*');
+    gameFrame.contentWindow.postMessage({
+      type: 'lakly:init',
+      player: { playerId: 'host', playerName: 'Хост', playerColor: '#E5384F' },
+    }, '*');
     if (lastGameState) {
       gameFrame.contentWindow.postMessage({ type: 'lakly:state', data: lastGameState }, '*');
     }
     return;
   }
-
   if (e.data.type === 'lakly:action') {
     if (typeof e.data.action !== 'string') return;
     socket.emit('game:action', { action: e.data.action, data: e.data.data });
@@ -468,7 +506,6 @@ async function refreshPlayers() {
     renderPlayers(j.players || []);
   } catch {}
 }
-
 function renderPlayers(list) {
   $('player-count').textContent = String(list.length);
   if (!list.length) {
@@ -490,7 +527,6 @@ function renderPlayers(list) {
     b.onclick = () => socket.emit('host:kick-player', { playerId: b.dataset.id });
   });
 }
-
 function renderChat() {
   if (!messages.length) {
     chatEl.innerHTML = '<div class="muted-text">Сообщений пока нет</div>';
@@ -504,33 +540,25 @@ function renderChat() {
   `).join('');
   chatEl.scrollTop = chatEl.scrollHeight;
 }
-
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
 }
-
 function updateGameControls() {
-  const visible = !gameFrameWrap.hidden;         // игра сейчас запущена
-  const hasSelection = !!pluginSelect.value;     // выбран хоть какой-то плагин
+  const visible = !gameFrameWrap.hidden;
+  const hasSelection = !!pluginSelect.value;
   const sameAsActive = pluginSelect.value === activePluginName;
-
-  // Кнопка «Запустить»:
-  // — disabled, если ничего не выбрано
-  // — disabled, если игра уже активна и выбран ровно тот же плагин
-  // — enabled во всех остальных случаях (запуск или смена игры)
   btnGameStart.disabled = !hasSelection || (visible && sameAsActive);
-
-  // Кнопка «Остановить» показывается только когда игра активна
   btnGameStop.hidden = !visible;
 }
-
 function resetUi() {
   hideLoading();
   statusDot.classList.remove('on');
   statusText.textContent = 'Не запущено';
-  btnStart.disabled = false;
+  roomActiveFlag = false;
+  currentRoomInfo = null;
+  setStartBtns(false);
   roomEmpty.hidden = false;
   roomActive.hidden = true;
   roomUrl.value = '—';
@@ -545,47 +573,159 @@ function resetUi() {
   gameFrame.src = 'about:blank';
   gameStatus.textContent = 'Не запущена';
   updateGameControls();
+  renderPluginsGrid();
 }
 
-// ═══════════ PLUGINS GRID ═══════════
+// ═══════════ GAMES GRID ═══════════
+const EMOJI = { clicker: '🎯', quiz: '🧠' };
+
+function renderPluginsGrid() {
+  pluginsGrid.querySelectorAll('.plugin-card').forEach(t => t.remove());
+
+  for (const p of pluginsCache) {
+    const card = document.createElement('div');
+    card.className = 'plugin-card';
+    card.dataset.pluginId = p.id;
+
+    let actionLabel = 'Запустить в комнате';
+    let actionClass = 'btn btn-brand btn-sm';
+    let actionDisabled = false;
+    let actionTitle = '';
+
+    if (!roomActiveFlag) {
+      actionLabel = 'Создать комнату';
+      actionTitle = 'Комната не создана — создадим её с этой игрой';
+    } else if (activePluginName === p.id) {
+      actionLabel = 'Игра идёт';
+      actionClass = 'btn btn-ghost btn-sm';
+      actionDisabled = true;
+    } else if (activePluginName) {
+      actionLabel = 'Сменить игру';
+      actionTitle = `Сейчас запущено: ${activePluginName}`;
+    }
+
+    card.innerHTML = `
+      <div class="plugin-emoji">${EMOJI[p.id] || '🎮'}</div>
+      <div class="plugin-name">${escapeHtml(p.name)}</div>
+      <div class="plugin-desc">${escapeHtml(p.description || '')}</div>
+      <div class="plugin-meta">v${escapeHtml(p.version)}</div>
+      <div class="plugin-actions">
+        <button class="${actionClass}" data-action="launch"
+                ${actionDisabled ? 'disabled' : ''}
+                title="${escapeHtml(actionTitle)}">${actionLabel}</button>
+        ${p.hasConfig ? `<button class="btn btn-ghost btn-sm" data-action="config" title="Настройки">⚙</button>` : ''}
+      </div>
+    `;
+    pluginsGrid.insertBefore(card, pluginAddTile);
+  }
+
+  pluginsGrid.querySelectorAll('[data-action="launch"]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.closest('.plugin-card').dataset.pluginId;
+      launchGameFromCard(id);
+    };
+  });
+  pluginsGrid.querySelectorAll('[data-action="config"]').forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.closest('.plugin-card').dataset.pluginId;
+      openConfigModal(id);
+    };
+  });
+}
+
+function launchGameFromCard(pluginId) {
+  if (!roomActiveFlag) {
+    setMode('default');
+    pluginSelect.value = pluginId;
+    switchView('room');
+    toast(`Создаём комнату с «${pluginId}»…`);
+    setTimeout(() => createRoom(), 100);
+    return;
+  }
+  pluginSelect.value = pluginId;
+  switchView('room');
+  if (activePluginName === pluginId) { toast('Эта игра уже запущена'); return; }
+  if (activePluginName) toast(`Смена игры: ${pluginId}`);
+  socket.emit('host:start-game', { pluginName: pluginId });
+}
+
+// ═══════════ CONFIG MODAL ═══════════
+async function openConfigModal(pluginId) {
+  editingPluginId = pluginId;
+  configTitle.textContent = `Настройки: ${pluginId}`;
+  configError.textContent = '';
+  configTextarea.value = 'Загрузка…';
+  configTextarea.disabled = true;
+  configSave.disabled = true;
+  configModal.hidden = false;
+
+  try {
+    const r = await fetch(`/api/plugins/${encodeURIComponent(pluginId)}/config`);
+    const j = await r.json();
+    configTextarea.value = j.config ? JSON.stringify(j.config, null, 2) : '{}';
+    configHint.textContent = j.isDefault
+      ? 'Это дефолтный конфиг. После сохранения он станет пользовательским.'
+      : 'Пользовательский конфиг. Изменения применятся сразу после сохранения.';
+  } catch (e) {
+    configTextarea.value = '{}';
+    configError.textContent = 'Не удалось загрузить конфиг: ' + e.message;
+  } finally {
+    configTextarea.disabled = false;
+    configSave.disabled = false;
+  }
+}
+configCancel.onclick = () => { configModal.hidden = true; editingPluginId = null; };
+configSave.onclick = async () => {
+  if (!editingPluginId) return;
+  configError.textContent = '';
+  let parsed;
+  try { parsed = JSON.parse(configTextarea.value); }
+  catch (e) { configError.textContent = 'Некорректный JSON: ' + e.message; return; }
+  configSave.disabled = true;
+  try {
+    const r = await fetch(`/api/plugins/${encodeURIComponent(editingPluginId)}/config`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ config: parsed }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+    toast('Конфиг сохранён');
+    configModal.hidden = true;
+    editingPluginId = null;
+    await loadPlugins();
+  } catch (e) { configError.textContent = 'Ошибка: ' + e.message; }
+  finally { configSave.disabled = false; }
+};
+configReset.onclick = async () => {
+  if (!editingPluginId) return;
+  if (!confirm('Сбросить конфиг к дефолтному?')) return;
+  try {
+    const r = await fetch(`/api/plugins/${encodeURIComponent(editingPluginId)}/config`, { method: 'DELETE' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+    toast('Сброшено к дефолту');
+    configModal.hidden = true;
+    editingPluginId = null;
+    await loadPlugins();
+  } catch (e) { configError.textContent = 'Ошибка: ' + e.message; }
+};
+
+// ═══════════ PLUGINS API ═══════════
 async function loadPlugins() {
   try {
     const r = await fetch('/api/plugins');
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const j = await r.json();
-
+    pluginsCache = j.plugins || [];
     pluginSelect.innerHTML = '';
     pluginSelect.append(makeOption('', '— Выбрать игру —'));
-    for (const p of j.plugins) {
-      pluginSelect.append(makeOption(p.id, p.name));
-    }
-
-    // Grid
-    const tiles = pluginsGrid.querySelectorAll('.plugin-card');
-    tiles.forEach(t => t.remove());
-
-    const EMOJI = { clicker: '🎯', quiz: '🧠' };
-
-    for (const p of j.plugins) {
-      const card = document.createElement('div');
-      card.className = 'plugin-card';
-      card.innerHTML = `
-        <div class="plugin-emoji">${EMOJI[p.id] || '🎮'}</div>
-        <div class="plugin-name">${escapeHtml(p.name)}</div>
-        <div class="plugin-desc">${escapeHtml(p.description || '')}</div>
-        <div class="plugin-meta">v${escapeHtml(p.version)}</div>
-      `;
-      pluginsGrid.insertBefore(card, pluginAddTile);
-    }
-  } catch (err) {
-    console.error('[loadPlugins]', err);
-  }
+    for (const p of pluginsCache) pluginSelect.append(makeOption(p.id, p.name));
+    renderPluginsGrid();
+  } catch (err) { console.error('[loadPlugins]', err); }
 }
-
 function makeOption(value, label) {
   const opt = document.createElement('option');
-  opt.value = value;
-  opt.textContent = label;
+  opt.value = value; opt.textContent = label;
   return opt;
 }
 
@@ -600,7 +740,6 @@ async function loadSettings() {
     $('set-port').value = s.port || 3000;
   } catch (e) { console.error('[loadSettings]', e); }
 }
-
 $('btn-save-settings').onclick = async () => {
   if (!window.lakly) { toast('Настройки недоступны'); return; }
   const merged = {
@@ -614,105 +753,76 @@ $('btn-save-settings').onclick = async () => {
   toast('Сохранено. Перезапустите приложение.');
 };
 
+// ═══════════ SELECT CHANGE ═══════════
+pluginSelect.addEventListener('change', () => {
+  const newPlugin = pluginSelect.value;
+  if (gameFrameWrap.hidden) { updateGameControls(); return; }
+  if (!newPlugin) { socket.emit('host:stop-game'); return; }
+  if (newPlugin === activePluginName) return;
+  socket.emit('host:start-game', { pluginName: newPlugin });
+});
+
 // ═══════════ DRAG & DROP ═══════════
 let dragCounter = 0;
 document.addEventListener('dragenter', (e) => {
-  e.preventDefault();
-  dragCounter++;
-  dropOverlay.classList.add('active');
+  e.preventDefault(); dragCounter++; dropOverlay.classList.add('active');
 });
 document.addEventListener('dragleave', (e) => {
-  e.preventDefault();
-  dragCounter--;
-  if (dragCounter <= 0) {
-    dragCounter = 0;
-    dropOverlay.classList.remove('active');
-  }
+  e.preventDefault(); dragCounter--;
+  if (dragCounter <= 0) { dragCounter = 0; dropOverlay.classList.remove('active'); }
 });
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', async (e) => {
-  e.preventDefault();
-  dragCounter = 0;
-  dropOverlay.classList.remove('active');
-
+  e.preventDefault(); dragCounter = 0; dropOverlay.classList.remove('active');
   const files = e.dataTransfer.files;
   if (!files.length) return;
   const file = files[0];
   if (!file.name.endsWith('.zip')) { toast('Нужен ZIP-архив'); return; }
-
-  const path = window.lakly?.getPathForFile?.(file) || file.path;
-  if (!path) { toast('Не удалось получить путь'); return; }
-
+  const p = window.lakly?.getPathForFile?.(file) || file.path;
+  if (!p) { toast('Не удалось получить путь'); return; }
   try {
-    const result = await window.lakly.installPluginZip(path);
+    const result = await window.lakly.installPluginZip(p);
     if (result.ok) { toast(`Плагин «${result.plugin}» установлен`); await loadPlugins(); }
-    else { showError('Ошибка установки', result.error); }
-  } catch (err) {
-    showError('Ошибка установки', err.message);
-  }
+    else showError('Ошибка установки', result.error);
+  } catch (err) { showError('Ошибка установки', err.message); }
 });
 
 function installPluginFromDialog() {
   const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.zip';
+  input.type = 'file'; input.accept = '.zip';
   input.onchange = async () => {
     const file = input.files[0];
     if (!file) return;
-    const path = window.lakly?.getPathForFile?.(file) || file.path;
-    if (!path) { toast('Не удалось получить путь'); return; }
-    const result = await window.lakly.installPluginZip(path);
+    const p = window.lakly?.getPathForFile?.(file) || file.path;
+    if (!p) { toast('Не удалось получить путь'); return; }
+    const result = await window.lakly.installPluginZip(p);
     if (result.ok) { toast(`Плагин «${result.plugin}» установлен`); await loadPlugins(); }
-    else { showError('Ошибка установки', result.error); }
+    else showError('Ошибка установки', result.error);
   };
   input.click();
 }
-
 btnInstallPlugin.onclick = installPluginFromDialog;
 pluginAddTile.onclick = installPluginFromDialog;
 
-// ═══════════ СМЕНА ИГРЫ ВО ВРЕМЯ АКТИВНОЙ КОМНАТЫ ═══════════
-pluginSelect.addEventListener('change', () => {
-  const newPlugin = pluginSelect.value;
-
-  // Если игра не запущена — просто обновляем кнопку
-  if (gameFrameWrap.hidden) {
-    updateGameControls();
-    return;
-  }
-
-  // Если выбрали «— Выбрать игру —» при активной игре — останавливаем
-  if (!newPlugin) {
-    socket.emit('host:stop-game');
-    return;
-  }
-
-  // Если выбрали тот же плагин, что сейчас активен — ничего не делаем
-  if (newPlugin === activePluginName) return;
-
-  // Смена игры: сервер сам остановит старую и запустит новую.
-  // (На сервере это делает Room.startGame — см. core/room.js)
-  const newName = getPluginNameFromSelect(newPlugin);
-  toast(`Смена игры: ${newName}`);
-  socket.emit('host:start-game', { pluginName: newPlugin });
-});
-
-function getPluginNameFromSelect(id) {
-  const opt = pluginSelect.querySelector(`option[value="${CSS.escape(id)}"]`);
-  if (!opt) return id;
-  // Формат опции: "Quiz — 5 вопросов с ответами" → берём до тире
-  return opt.textContent.split(' — ')[0].trim() || id;
-}
-
-// ═══════════ TRAY ═══════════
-if (window.lakly?.onTrayCloseRoom) {
-  window.lakly.onTrayCloseRoom(() => {
-    if (!btnStop.disabled) socket.emit('host:close-room');
-  });
-}
-if (window.lakly?.onTrayCreateRoom) {
-  window.lakly.onTrayCreateRoom(() => {
-    if (!btnStart.disabled) btnStart.click();
+// ═══════════ TRAY ACTIONS ═══════════
+if (window.lakly?.onTrayAction) {
+  window.lakly.onTrayAction((action) => {
+    switch (action) {
+      case 'create-room':
+        if (!roomActiveFlag) createRoom();
+        break;
+      case 'close-room':
+        if (roomActiveFlag) socket.emit('host:close-room');
+        break;
+      case 'copy-link':
+        if (roomUrl.value && roomUrl.value !== '—') {
+          navigator.clipboard.writeText(roomUrl.value).then(() => toast('Ссылка скопирована'));
+        }
+        break;
+      case 'open-guest':
+        btnJoinGuest.click();
+        break;
+    }
   });
 }
 
@@ -721,4 +831,5 @@ window.addEventListener('load', async () => {
   await checkFirstRun();
   loadSettings();
   loadPlugins();
+  setMode('default');
 });

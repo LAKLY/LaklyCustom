@@ -11,8 +11,7 @@ export class RoomManager {
   }
 
   async createRoom({ name, hostSocket, pluginName = null, type = 'default',
-                     staticDir = null, proxyPort = null }) {
-    // Закрываем прежнюю комнату этого же хоста
+                     staticDir = null, proxyPort = null, options = {} }) {
     for (const room of this.rooms.values()) {
       if (room.hostSocketId === hostSocket.id && room.isActive) {
         await room.close('replaced');
@@ -30,14 +29,13 @@ export class RoomManager {
     room.type = type;
     room.staticDir = staticDir;
     room.proxyPort = proxyPort;
+    room.options = options || {};
 
     this.rooms.set(room.id, room);
     this.socketRoom.set(hostSocket.id, room.id);
     hostSocket.join(room.channel());
 
-    // Lifecycle-хук: плагины могут инициализировать своё состояние
     await this.pluginLoader.emit(EVENTS.ROOM_CREATED, { room });
-
     return room;
   }
 
@@ -48,11 +46,6 @@ export class RoomManager {
     return roomId ? this.rooms.get(roomId) : null;
   }
 
-  /**
-   * Найти активную комнату.
-   * - без аргумента: любую активную
-   * - с типом: только указанного типа ('default' | 'plugin' | 'static' | 'proxy')
-   */
   findActive(type) {
     for (const room of this.rooms.values()) {
       if (!room.isActive) continue;
@@ -70,7 +63,6 @@ export class RoomManager {
     if (!room) return;
     await room.close('closed');
     this.rooms.delete(roomId);
-
     for (const [sid, id] of this.socketRoom) {
       if (id === roomId) this.socketRoom.delete(sid);
     }
