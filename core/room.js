@@ -28,7 +28,7 @@ export class Room {
     this.type = pluginName ? 'plugin' : 'default';
     this.staticDir = null;
     this.proxyPort = null;
-    this.options = {};   // ← новое: настройки режима
+    this.options = {};   // настройки режима (например, chatEnabled)
   }
 
   channel() { return `room:${this.id}`; }
@@ -61,6 +61,7 @@ export class Room {
       activePlugin: this.activePluginName,
       gameActive: this.gameActive,
       type: this.type,
+      chatEnabled: this.options?.chatEnabled !== false,
     });
 
     this.broadcast(EVENTS.ROOM_UPDATED, this.publicPlayers());
@@ -174,7 +175,6 @@ export class Room {
     await this.pluginLoader.emit(EVENTS.ROOM_DESTROYED, { roomId: this.id });
 
     // Все plugin-worker'ы забывают состояние этой комнаты.
-    // `?.` — для тестовых моков без метода cleanupRoom.
     this.pluginLoader.cleanupRoom?.(this.id);
   }
 }

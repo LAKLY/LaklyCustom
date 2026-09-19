@@ -1573,3 +1573,51 @@ select {
   padding: 7px 10px;
   font-size: 13px;
 }
+
+/* ═══════════ GAME FULLSCREEN ═══════════ */
+.game-fs-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--text-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--t-fast) var(--ease);
+  flex-shrink: 0;
+}
+.game-fs-btn:hover {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--border);
+}
+.game-fs-btn.is-active {
+  color: var(--brand-hover);
+  background: var(--brand-soft);
+  border-color: var(--brand);
+}
+.game-fs-btn.is-active svg {
+  transform: scale(0.9);
+}
+
+/* Фолбэк на случай, если requestFullscreen() недоступен */
+.game-frame-wrap.pseudo-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  border-radius: 0;
+  border: 0;
+  margin: 0;
+  max-width: none;
+  aspect-ratio: auto;
+  background: var(--bg);
+}
+.game-frame-wrap:fullscreen {
+  border-radius: 0;
+  border: 0;
+  background: var(--bg);
+}

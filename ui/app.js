@@ -33,6 +33,7 @@ const qrEl          = $('qr');
 const pluginSelect  = $('plugin-select');
 const gameFrame     = $('game-frame');
 const gameFrameWrap = $('game-frame-wrap');
+const btnGameFullscreen = $('btn-game-fullscreen');
 const gameStatus    = $('game-status');
 const btnGameStart  = $('btn-game-start');
 const btnGameStop   = $('btn-game-stop');
@@ -141,7 +142,6 @@ errorClose.onclick = () => { errorModal.hidden = true; };
 function showLoading(text) {
   loadingText.textContent = text || 'Открываем комнату…';
 
-  // Сбрасываем tips
   clearInterval(loadingTipTimer);
   loadingTipTimer = null;
   loadingTipIndex = 0;
@@ -150,7 +150,6 @@ function showLoading(text) {
     loadingTip.classList.remove('show');
   }
 
-  // Запускаем ротацию подсказок — первая появится через LOADING_TIP_INTERVAL_MS
   if (loadingTip) {
     loadingTipTimer = setInterval(() => {
       if (loadingTipIndex >= LOADING_TIPS.length) {
@@ -335,10 +334,13 @@ function createRoom() {
 
   // default
   const name = ($('room-name-default')?.value || 'Lakly Room').trim() || 'Lakly Room';
+  const options = {
+    chatEnabled: $('opt-default-chat')?.checked !== false,
+  };
   setStartBtns(true);
   showLoading('Открываем комнату…');
   const pluginName = pluginSelect.value || null;
-  socket.emit('host:create-room', { roomName: name, type: 'default', pluginName });
+  socket.emit('host:create-room', { roomName: name, type: 'default', pluginName, options });
 }
 function setStartBtns(disabled) {
   btnStart.disabled = disabled;
@@ -470,7 +472,6 @@ socket.on('host:tunnel-state', ({ state }) => {
     case 'up':
       statusDot.classList.add('on');
       statusText.textContent = 'Комната активна';
-      // Гасим Nika, если висела от offline/restarting.
       nikaNotify.classList.remove('show');
       break;
     default:
@@ -490,6 +491,11 @@ function applyRoomModeUi(data) {
     roomHeroTitle.textContent = 'Отправьте ссылку друзьям';
     btnSend.disabled = false;
     chatInput.disabled = false;
+
+    // Скрываем секцию чата, если хост её отключил при создании.
+    const chatOn = data.options?.chatEnabled !== false;
+    const chatSec = document.querySelector('#room-content-default .chat-section');
+    if (chatSec) chatSec.hidden = !chatOn;
   } else if (type === 'static') {
     roomBadge.textContent = 'Раздача папки';
     roomHeroTitle.textContent = 'Отправьте ссылку друзьям — они увидят ваш сайт';
@@ -551,6 +557,7 @@ socket.on('game:started', ({ plugin, url }) => {
   lastGameState = null;
   if (pluginSelect.value !== plugin) pluginSelect.value = plugin;
   updateGameControls();
+  if (btnGameFullscreen) btnGameFullscreen.hidden = false;
   renderPluginsGrid();
 });
 socket.on('game:stopped', () => {
@@ -560,6 +567,8 @@ socket.on('game:stopped', () => {
   lastGameState = null;
   activePluginName = null;
   updateGameControls();
+  if (btnGameFullscreen) btnGameFullscreen.hidden = true;
+  exitGameFullscreen();
   renderPluginsGrid();
 });
 socket.on('game:state', (data) => {
@@ -580,7 +589,6 @@ socket.on('disconnect', () => {
 });
 
 socket.on('connect', () => {
-  // Восстановили соединение с локальным сервером — обновляем статус.
   if (roomActiveFlag) {
     statusDot.classList.add('on');
     statusText.textContent = currentRoomInfo?.provider === 'local'
@@ -690,9 +698,49 @@ function resetUi() {
   gameFrameWrap.hidden = true;
   gameFrame.src = 'about:blank';
   gameStatus.textContent = 'Не запущена';
+  if (btnGameFullscreen) btnGameFullscreen.hidden = true;
+  exitGameFullscreen();
   updateGameControls();
   renderPluginsGrid();
 }
+
+// ═══════════ FULLSCREEN ИГРЫ ═══════════
+async function toggleGameFullscreen() {
+  if (!gameFrameWrap) return;
+  const target = gameFrameWrap;
+
+  if (document.fullscreenElement) {
+    try { await document.exitFullscreen(); } catch {}
+    return;
+  }
+  try {
+    await target.requestFullscreen();
+  } catch {
+    target.classList.toggle('pseudo-fullscreen');
+    updateFullscreenButton();
+  }
+}
+
+function exitGameFullscreen() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
+  gameFrameWrap?.classList.remove('pseudo-fullscreen');
+  updateFullscreenButton();
+}
+
+function updateFullscreenButton() {
+  if (!btnGameFullscreen) return;
+  const active = !!document.fullscreenElement ||
+                 gameFrameWrap?.classList.contains('pseudo-fullscreen');
+  btnGameFullscreen.title = active ? 'Выйти из полноэкранного режима' : 'На весь экран';
+  btnGameFullscreen.classList.toggle('is-active', active);
+}
+
+if (btnGameFullscreen) {
+  btnGameFullscreen.onclick = toggleGameFullscreen;
+}
+document.addEventListener('fullscreenchange', updateFullscreenButton);
 
 // ═══════════ GAMES GRID ═══════════
 const EMOJI = { clicker: '🎯', quiz: '🧠' };
@@ -786,13 +834,13 @@ async function removePlugin(pluginId) {
 
     toast(`Плагин «${displayName}» удалён`);
 
-    // Если удалили активный плагин — сервер уже остановил игру,
-    // но подчистим UI на всякий случай.
     if (activePluginName === pluginId) {
       activePluginName = null;
       gameFrameWrap.hidden = true;
       gameFrame.src = 'about:blank';
       gameStatus.textContent = 'Не запущена';
+      if (btnGameFullscreen) btnGameFullscreen.hidden = true;
+      exitGameFullscreen();
       updateGameControls();
     }
 

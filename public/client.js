@@ -115,6 +115,37 @@ function send() {
   $('chat-input').value = '';
 }
 
+// ═══════════ FULLSCREEN ИГРЫ ═══════════
+const btnGameFs = $('btn-game-fullscreen');
+
+async function toggleGameFullscreen() {
+  const target = $('game-block');
+  if (!target) return;
+
+  if (document.fullscreenElement) {
+    try { await document.exitFullscreen(); } catch {}
+    return;
+  }
+  try {
+    await target.requestFullscreen();
+  } catch {
+    target.classList.toggle('pseudo-fullscreen');
+  }
+  updateFsButton();
+}
+
+function updateFsButton() {
+  if (!btnGameFs) return;
+  const target = $('game-block');
+  const active = !!document.fullscreenElement ||
+                 target?.classList.contains('pseudo-fullscreen');
+  btnGameFs.title = active ? 'Выйти из полноэкранного режима' : 'На весь экран';
+  btnGameFs.classList.toggle('is-active', active);
+}
+
+if (btnGameFs) btnGameFs.onclick = toggleGameFullscreen;
+document.addEventListener('fullscreenchange', updateFsButton);
+
 // ═══════════ SOCKET ═══════════
 socket.on('connect', () => {
   console.log('[guest] socket connected');
@@ -146,6 +177,10 @@ socket.on('player:joined-success', (data) => {
 
   $('player-self').textContent = data.playerName || '—';
   $('player-self').style.color = data.playerColor || 'inherit';
+
+  // Скрываем чат, если хост отключил его при создании комнаты.
+  const chatEl = document.querySelector('.guest-chat');
+  if (chatEl) chatEl.hidden = data.chatEnabled === false;
 
   setJoinButton('joined', 'Войти в комнату');
   show('room-screen');
@@ -237,6 +272,10 @@ function hideGame() {
   block.classList.remove('loading');
   block.hidden = true;
   $('game-frame').src = 'about:blank';
+
+  // Сбрасываем fullscreen, если был активен.
+  block.classList.remove('pseudo-fullscreen');
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 }
 
 window.addEventListener('message', (e) => {
@@ -306,7 +345,6 @@ function renderPlayers(list) {
       playerNodes.set(p.id, node);
       el.appendChild(node);
     } else {
-      // Обновляем имя/цвет на случай, если сменились (редко, но бывает).
       const nameEl = node.querySelector('.player-name');
       const avEl = node.querySelector('.avatar');
       if (nameEl && nameEl.textContent !== p.name) nameEl.textContent = p.name;
@@ -368,7 +406,6 @@ function renderChat() {
   }).join('');
 
   // Вниз прыгаем только если пользователь и так был у нижней границы.
-  // Иначе — сохраняем его позицию чтения.
   if (wasNearBottom) {
     el.scrollTop = el.scrollHeight;
   } else {

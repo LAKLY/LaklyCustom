@@ -104,7 +104,6 @@
   <main class="main">
     <!-- ══════════ ROOM ══════════ -->
     <section class="view active" data-view="room">
-      <!-- Пустая комната: 3 режима + отдельные панели -->
       <div class="room-empty" id="room-empty">
         <h1 class="hero-title">Запустите комнату</h1>
         <p class="hero-sub">Выберите режим и создайте комнату — гости подключатся по ссылке.</p>
@@ -137,6 +136,12 @@
         <div class="mode-panel" id="panel-default">
           <label>Название комнаты</label>
           <input id="room-name-default" type="text" value="Lakly Room" maxlength="40">
+
+          <label class="checkbox-option" style="margin-top: 4px;">
+            <input type="checkbox" id="opt-default-chat" checked>
+            <span>Включить чат в комнате</span>
+          </label>
+
           <p class="hint">Игру можно будет запустить сразу после создания комнаты.</p>
           <button id="btn-start" class="btn btn-brand btn-xl">Создать комнату</button>
         </div>
@@ -241,6 +246,13 @@
               <div class="section-head">
                 <h2>Игра</h2>
                 <span class="game-status" id="game-status">Не запущена</span>
+                <button id="btn-game-fullscreen" class="game-fs-btn" type="button"
+                        title="На весь экран" aria-label="На весь экран" hidden>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                       stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/>
+                  </svg>
+                </button>
               </div>
               <div class="game-controls">
                 <select id="plugin-select">
