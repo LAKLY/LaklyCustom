@@ -7,8 +7,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "test": "node --test tests/**/*.test.js",
-    "test:watch": "node --test --watch tests/**/*.test.js"
+    "test": "node --test",
+    "test:watch": "node --test --watch"
   },
   "dependencies": {
     "express": "^4.22.3",

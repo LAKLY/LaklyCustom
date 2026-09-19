@@ -125,4 +125,3 @@ coverage/
 *.tar.gz
 .eslintcache
 .stylelintcache
-tests/
