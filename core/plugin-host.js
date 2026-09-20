@@ -133,6 +133,8 @@ export class PluginHost {
 
     if (!loaded.ok) {
       console.error(`[plugin-host] plugin load failed: ${loaded.error}`);
+      try { await this.worker.terminate(); } catch {}
+      this.worker = null;
       throw new Error(loaded.error || 'plugin load failed');
     }
     this.loaded = true;
@@ -239,6 +241,10 @@ export class PluginHost {
 
   _onMessage(msg) {
     switch (msg.type) {
+      case 'debug':
+        console.log(`[worker] ${msg.step}${msg.extra ? ': ' + (typeof msg.extra === 'string' ? msg.extra : JSON.stringify(msg.extra)) : ''}`);
+        break;
+
       case 'ready':
         console.log('[plugin-host] ready signal received');
         if (this._readyResolve) {
