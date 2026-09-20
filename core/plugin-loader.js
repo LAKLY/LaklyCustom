@@ -39,6 +39,10 @@ export class PluginLoader {
   }
 
   async load() {
+    console.log('[plugins] === LOAD START ===');
+    console.log(`[plugins] pluginsDir=${this.pluginsDir}`);
+    console.log(`[plugins] pluginDataDir=${this.pluginDataDir}`);
+
     for (const [, rec] of this.plugins) {
       try { await rec.host?.unload?.(); } catch {}
     }
@@ -50,9 +54,15 @@ export class PluginLoader {
     let entries = [];
     try {
       entries = await fs.readdir(this.pluginsDir, { withFileTypes: true });
-    } catch {
-      console.warn('[plugins] Папка plugins/ не найдена');
+      console.log(`[plugins] readdir ok, entries=${entries.length}`);
+    } catch (err) {
+      console.error(`[plugins] readdir FAILED: ${err.message}`);
+      console.error(`[plugins] tried path: ${this.pluginsDir}`);
       return;
+    }
+
+    for (const entry of entries) {
+      console.log(`[plugins] entry: ${entry.name}, isDirectory=${entry.isDirectory()}`);
     }
 
     for (const entry of entries) {
@@ -60,45 +70,78 @@ export class PluginLoader {
       if (entry.name.startsWith('_install_')) continue;
       if (entry.name.startsWith('_backup_')) continue;
       if (entry.name.startsWith('_data')) continue;
+      console.log(`[plugins] -> loading ${entry.name}`);
       await this._loadOne(entry.name);
     }
-  }
 
-  async reload() { await this.load(); }
-
-  async reloadOne(id) {
-    const rec = this.plugins.get(id);
-    if (!rec) return;
-    const dirName = path.basename(rec.dir);
-    try { await rec.host?.unload?.(); } catch {}
-    this.plugins.delete(id);
-    for (const [event, list] of this.handlers) {
-      const filtered = list.filter(h => h.pluginName !== id);
-      if (filtered.length === 0) this.handlers.delete(event);
-      else this.handlers.set(event, filtered);
-    }
-    await this._loadOne(dirName);
-  }
-
-  async unloadAll() {
+    console.log(`[plugins] === LOAD DONE, total loaded: ${this.plugins.size} ===`);
     for (const [id, rec] of this.plugins) {
-      try { await rec.host?.unload?.(); } catch {}
-      this.plugins.delete(id);
+      console.log(`[plugins]   registered: ${id} v${rec.version}`);
     }
-    this.handlers.clear();
   }
 
-  async unload(pluginName) {
-    const rec = this.plugins.get(pluginName);
-    if (!rec) return;
-    try { await rec.host?.unload?.(); } catch {}
-    this.plugins.delete(pluginName);
-    for (const [event, list] of this.handlers) {
-      const filtered = list.filter(h => h.pluginName !== pluginName);
-      if (filtered.length === 0) this.handlers.delete(event);
-      else this.handlers.set(event, filtered);
+  async _loadOne(dirName) {
+    console.log(`[plugins] === _loadOne(${dirName}) ===`);
+    const dir = path.join(this.pluginsDir, dirName);
+    console.log(`[plugins] dir=${dir}`);
+
+    const rawManifest = await this._readManifest(dir);
+    console.log(`[plugins] rawManifest=${JSON.stringify(rawManifest)}`);
+
+    const manifest = this._validateManifest(rawManifest, dirName);
+    if (!manifest) {
+      console.warn(`[plugins] ${dirName}: невалидный manifest, пропускаем`);
+      return;
     }
-    await this.emit(EVENTS.PLUGIN_UNLOADED, { name: pluginName });
+    console.log(`[plugins] ${dirName}: manifest ok, id=${manifest.id}, entry=${manifest.entry}`);
+
+    const entryPath = path.join(dir, manifest.entry);
+    try {
+      await fs.access(entryPath, fs.constants.R_OK);
+      console.log(`[plugins] ${dirName}: entry file accessible`);
+    } catch (err) {
+      console.warn(`[plugins] ${dirName}: не найден ${manifest.entry} (${err.message})`);
+      return;
+    }
+
+    const entryUrl = pathToFileURL(entryPath).href;
+    console.log(`[plugins] ${dirName}: entryUrl=${entryUrl}`);
+
+    const { config } = await this.readConfig(manifest.id);
+    console.log(`[plugins] ${dirName}: config loaded, hasConfig=${!!config}`);
+
+    const host = new PluginHost({
+      io: this.io,
+      getRoom: (roomId) => this.roomManager?.getRoom(roomId) || null,
+      getRoomState: (roomId) => this._buildRoomState(roomId),
+    });
+
+    let loaded;
+    try {
+      loaded = await host.start(entryUrl, config);
+      console.log(`[plugins] ${dirName}: host.start returned: ${JSON.stringify(loaded)}`);
+    } catch (err) {
+      console.error(`[plugins] ${dirName}: host.start FAILED — ${err.stack || err.message}`);
+      return;
+    }
+
+    const record = {
+      id: manifest.id,
+      name: loaded.name || manifest.name,
+      version: loaded.version || manifest.version,
+      description: loaded.description || manifest.description,
+      apiVersion: manifest.apiVersion,
+      hasConfig: !!config,
+      host, dir,
+      publicDir: path.join(dir, 'public'),
+      manifest,
+    };
+
+    this.plugins.set(manifest.id, record);
+    this._registerHooks(manifest.id, loaded.hookNames || []);
+
+    console.log(`[plugins] Загружен: ${manifest.id} v${record.version} (sandboxed)`);
+    await this.emit(EVENTS.PLUGIN_LOADED, { name: manifest.id });
   }
 
   // ─── Удаление плагина ───────────────────────────────────────
@@ -181,6 +224,7 @@ export class PluginLoader {
 
   // ─── Загрузка одного плагина ────────────────────────────────
   async _loadOne(dirName) {
+    console.log(`[plugins] === loading ${dirName} ===`);
     const dir = path.join(this.pluginsDir, dirName);
     const rawManifest = await this._readManifest(dir);
     const manifest = this._validateManifest(rawManifest, dirName);
@@ -188,12 +232,18 @@ export class PluginLoader {
       console.warn(`[plugins] ${dirName}: невалидный manifest, пропускаем`);
       return;
     }
+    console.log(`[plugins] ${dirName}: manifest ok, id=${manifest.id}, entry=${manifest.entry}`);
 
     const entryPath = path.join(dir, manifest.entry);
     try { await fs.access(entryPath, fs.constants.R_OK); }
-    catch { console.warn(`[plugins] ${dirName}: не найден ${manifest.entry}`); return; }
+    catch {
+      console.warn(`[plugins] ${dirName}: не найден ${manifest.entry}`);
+      return;
+    }
 
     const entryUrl = pathToFileURL(entryPath).href;
+    console.log(`[plugins] ${dirName}: entryUrl=${entryUrl}`);
+
     const { config } = await this.readConfig(manifest.id);
 
     const host = new PluginHost({
@@ -206,7 +256,7 @@ export class PluginLoader {
     try {
       loaded = await host.start(entryUrl, config);
     } catch (err) {
-      console.error(`[plugins] ${dirName}: ${err.message}`);
+      console.error(`[plugins] ${dirName}: host.start failed — ${err.message}`);
       return;
     }
 

@@ -929,16 +929,29 @@ configReset.onclick = async () => {
 
 // ═══════════ PLUGINS API ═══════════
 async function loadPlugins() {
+  console.log('[app.js] loadPlugins() called');
   try {
     const r = await fetch('/api/plugins');
+    console.log('[app.js] fetch /api/plugins status=' + r.status);
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const j = await r.json();
+    console.log('[app.js] response: ' + JSON.stringify(j));
+
     pluginsCache = j.plugins || [];
+    console.log('[app.js] pluginsCache.length=' + pluginsCache.length);
+    console.log('[app.js] pluginSelect=' + (pluginSelect ? 'ok' : 'NULL'));
+    console.log('[app.js] pluginsGrid=' + (pluginsGrid ? 'ok' : 'NULL'));
+    console.log('[app.js] pluginAddTile=' + (pluginAddTile ? 'ok' : 'NULL'));
+
     pluginSelect.innerHTML = '';
     pluginSelect.append(makeOption('', '— Выбрать игру —'));
     for (const p of pluginsCache) pluginSelect.append(makeOption(p.id, p.name));
+
     renderPluginsGrid();
-  } catch (err) { console.error('[loadPlugins]', err); }
+    console.log('[app.js] loadPlugins() done');
+  } catch (err) {
+    console.error('[app.js] loadPlugins FAILED:', err.stack || err.message);
+  }
 }
 function makeOption(value, label) {
   const opt = document.createElement('option');

@@ -23,13 +23,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const PROXY_CHECK_RATE = { max: 30, windowMs: 60_000 };
 
-// В dev-режиме плагины лежат в <project>/plugins.
-// В собранном .exe (electron-builder) — в resources/plugins,
-// потому что папка вынесена в extraResources (asar её не читает).
-const PLUGINS_DIR = process.env.LAKLY_RESOURCES
-  ? path.join(process.env.LAKLY_RESOURCES, 'plugins')
-  : path.join(ROOT, 'plugins');
-
 function buildCorsOrigin() {
   return (origin, cb) => {
     if (!origin) return cb(null, true);
@@ -71,7 +64,16 @@ export async function startServer({
 
   app.use(express.json({ limit: '128kb' }));
 
-  const pluginLoader = new PluginLoader(PLUGINS_DIR, { pluginDataDir });
+  // ВАЖНО: путь к плагинам вычисляем здесь, внутри startServer, а не на
+  // верхнем уровне модуля. Верхнеуровневый код ESM выполняется ДО того,
+  // как electron/main.js успевает выставить process.env.LAKLY_RESOURCES,
+  // поэтому константа на уровне модуля получала dev-путь — в собранном
+  // приложении это указывало внутрь app.asar и давало ENOTDIR.
+  const pluginsDir = process.env.LAKLY_RESOURCES
+    ? path.join(process.env.LAKLY_RESOURCES, 'plugins')
+    : path.join(ROOT, 'plugins');
+
+  const pluginLoader = new PluginLoader(pluginsDir, { pluginDataDir });
   const roomManager = new RoomManager(io, pluginLoader);
   pluginLoader.attachServer({ io, roomManager });
   await pluginLoader.load();

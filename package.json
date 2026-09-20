@@ -2,13 +2,18 @@
   "name": "laklycustom",
   "version": "0.8.0",
   "description": "LaklyCustom — plugin-driven desktop host for local rooms",
-  "main": "electron/main.js",
+  "main": "electron/main.mjs",
   "type": "module",
+  "author": "LAKLY",
+  "license": "MIT",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
     "test": "node --test",
-    "test:watch": "node --test --watch"
+    "test:watch": "node --test --watch",
+    "dist": "electron-builder --win",
+    "dist:portable": "electron-builder --win portable",
+    "pack": "electron-builder --dir"
   },
   "dependencies": {
     "express": "^4.22.3",
@@ -20,9 +25,65 @@
     "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^24.13.3"
   },
-  "allowScripts": {
-    "electron@33.4.11": true
+  "build": {
+    "appId": "com.lakly.custom",
+    "productName": "LaklyCustom",
+    "copyright": "Copyright © 2026 LAKLY",
+    "compression": "store",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "core/**/*",
+      "ui/**/*",
+      "public/**/*",
+      "shared/**/*",
+      "assets/**/*",
+      "!**/*.md",
+      "!**/tests/**",
+      "!**/docs/**"
+    ],
+    "asarUnpack": [
+      "core/plugin-worker.js",
+      "node_modules/untun/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "plugins",
+        "to": "plugins",
+        "filter": [
+          "**/*",
+          "!**/node_modules/**",
+          "!**/config.json"
+        ]
+      },
+      {
+        "from": "shared",
+        "to": "shared",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "LaklyCustom",
+      "deleteAppDataOnUninstall": false
+    }
   }
 }

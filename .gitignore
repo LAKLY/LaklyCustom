@@ -125,3 +125,5 @@ coverage/
 *.tar.gz
 .eslintcache
 .stylelintcache
+.vscode/*
+!.vscode/settings.json

@@ -1,6 +1,7 @@
 // core/tunnel-supervisor.js
 import { openTunnel, closeTunnel } from './tunnels/index.js';
 import dns from 'node:dns/promises';
+import { spawnSync } from 'node:child_process';
 
 // ─── Настройки мониторинга ──────────────────────────────────
 const HEALTH_INTERVAL_MS       = 45_000;
@@ -104,10 +105,21 @@ export class TunnelSupervisor {
     clearTimeout(this.#restartTimer);
     this.#healthTimer = null;
     this.#restartTimer = null;
-    await closeWithTimeout(this.#instance, CLOSE_TIMEOUT_MS);
+
+    if (this.#instance) {
+      try {
+        await closeWithTimeout(this.#instance, CLOSE_TIMEOUT_MS);
+      } catch (err) {
+        console.warn(`[tunnel-sup] stop error: ${err.message}`);
+      }
+    }
     this.#instance = null;
     this.#url = null;
     this.#provider = null;
+
+    // Дополнительная зачистка: даже если close() вернулся, cloudflared
+    // мог остаться висеть (например, если untun не смог его убить).
+    await killCloudflaredProcesses();
   }
 
   async forceRestart() {
@@ -318,5 +330,23 @@ async function probeJson(url, timeoutMs) {
     return true;
   } catch {
     return false;
+  }
+
+}
+
+async function killCloudflaredProcesses() {
+  if (process.platform !== 'win32') return;
+  try {
+    const res = spawnSync(
+      'taskkill',
+      ['/F', '/IM', 'cloudflared.exe'],
+      { stdio: 'ignore', windowsHide: true }
+    );
+    // 0 — успех, 128 — не найдено (это норма)
+    if (res.status !== 0 && res.status !== 128) {
+      console.warn(`[tunnel-sup] taskkill cloudflared exit=${res.status}`);
+    }
+  } catch (err) {
+    console.warn(`[tunnel-sup] taskkill cloudflared failed: ${err.message}`);
   }
 }

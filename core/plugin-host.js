@@ -7,6 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKER_PATH = path.join(__dirname, 'plugin-worker.js');
 
 const HOOK_TIMEOUT_MS = 5000;
+const READY_TIMEOUT_MS = 10_000;
 
 const WORKER_RESOURCE_LIMITS = {
   maxOldGenerationSizeMb: 128,
@@ -25,16 +26,40 @@ export class PluginHost {
     this.nextRequestId = 1;
 
     this._readyResolve = null;
+    this._readyError = null;
     this._loadResolve = null;
     this._unloadResolve = null;
   }
 
   async start(entryUrl, config = null) {
-    this.worker = new Worker(WORKER_PATH, { resourceLimits: WORKER_RESOURCE_LIMITS });
+    console.log(`[plugin-host] start: entryUrl=${entryUrl}`);
+    console.log(`[plugin-host] WORKER_PATH=${WORKER_PATH}`);
 
-    this.worker.on('message', (msg) => this._onMessage(msg));
+    this._readyError = null;
+
+    try {
+      this.worker = new Worker(WORKER_PATH, {
+        resourceLimits: WORKER_RESOURCE_LIMITS,
+      });
+      console.log('[plugin-host] worker constructed');
+    } catch (err) {
+      console.error(`[plugin-host] worker construction failed: ${err.stack || err}`);
+      throw err;
+    }
+
+    this.worker.on('online', () => console.log('[plugin-host] worker online'));
+    this.worker.on('message', (msg) => {
+      console.log(`[plugin-host] <- ${msg?.type}`);
+      this._onMessage(msg);
+    });
     this.worker.on('error', (err) => {
-      console.error('[plugin-host] worker error:', err.message);
+      console.error(`[plugin-host] worker error: ${err.stack || err}`);
+      if (this._readyResolve) {
+        this._readyError = err;
+        const r = this._readyResolve;
+        this._readyResolve = null;
+        r();
+      }
       for (const [, p] of this.pending) {
         clearTimeout(p.timer);
         p.reject(err);
@@ -42,18 +67,77 @@ export class PluginHost {
       this.pending.clear();
     });
     this.worker.on('exit', (code) => {
-      if (code !== 0) console.warn(`[plugin-host] worker exited code=${code}`);
+      console.log(`[plugin-host] worker exited code=${code}`);
+      if (this._readyResolve) {
+        this._readyError = new Error(`worker exited code=${code}`);
+        const r = this._readyResolve;
+        this._readyResolve = null;
+        r();
+      }
     });
 
+    // ─── Ждём ready с таймаутом ─────────────────────────────
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      console.error(`[plugin-host] worker ready timeout (${READY_TIMEOUT_MS}ms)`);
+      if (this._readyResolve) {
+        const r = this._readyResolve;
+        this._readyResolve = null;
+        r();
+      }
+    }, READY_TIMEOUT_MS);
+    timer.unref?.();
+
     await new Promise((resolve) => { this._readyResolve = resolve; });
+    clearTimeout(timer);
+
+    if (timedOut) {
+      try { await this.worker.terminate(); } catch {}
+      this.worker = null;
+      this.loaded = false;
+      throw new Error('worker failed to start (timeout)');
+    }
+    if (this._readyError) {
+      try { await this.worker.terminate(); } catch {}
+      this.worker = null;
+      this.loaded = false;
+      throw this._readyError;
+    }
+
+    console.log('[plugin-host] ready received, sending load command');
+
+    let loadTimedOut = false;
+    const loadTimer = setTimeout(() => {
+      loadTimedOut = true;
+      console.error(`[plugin-host] load timeout (${READY_TIMEOUT_MS}ms)`);
+      if (this._loadResolve) {
+        const r = this._loadResolve;
+        this._loadResolve = null;
+        r({ ok: false, error: 'load timeout' });
+      }
+    }, READY_TIMEOUT_MS);
+    loadTimer.unref?.();
 
     const loaded = await new Promise((resolve) => {
       this._loadResolve = resolve;
       this.worker.postMessage({ type: 'load', entryUrl, config });
     });
+    clearTimeout(loadTimer);
 
-    if (!loaded.ok) throw new Error(loaded.error || 'plugin load failed');
+    if (loadTimedOut) {
+      try { await this.worker.terminate(); } catch {}
+      this.worker = null;
+      throw new Error('load timeout');
+    }
+
+    if (!loaded.ok) {
+      console.error(`[plugin-host] plugin load failed: ${loaded.error}`);
+      throw new Error(loaded.error || 'plugin load failed');
+    }
     this.loaded = true;
+
+    console.log(`[plugin-host] plugin loaded: ${loaded.name} v${loaded.version}`);
 
     return {
       name: loaded.name,
@@ -68,15 +152,17 @@ export class PluginHost {
     const w = this.worker;
 
     try {
-      await new Promise((resolve) => {
-        this._unloadResolve = resolve;
-        w.postMessage({ type: 'unload' });
-      });
-    } catch { /* ignore */ }
+      await Promise.race([
+        new Promise((resolve) => {
+          this._unloadResolve = resolve;
+          w.postMessage({ type: 'unload' });
+        }),
+        new Promise((resolve) => setTimeout(resolve, 1000)),
+      ]);
+    } catch { }
 
     try { w.postMessage({ type: 'shutdown' }); } catch {}
 
-    // Явно ждём выхода worker'а, с предохранителем на 500 мс.
     await new Promise((resolve) => {
       let done = false;
       const finish = () => {
@@ -154,18 +240,28 @@ export class PluginHost {
   _onMessage(msg) {
     switch (msg.type) {
       case 'ready':
-        this._readyResolve?.();
-        this._readyResolve = null;
+        console.log('[plugin-host] ready signal received');
+        if (this._readyResolve) {
+          const r = this._readyResolve;
+          this._readyResolve = null;
+          r();
+        }
         break;
 
       case 'loaded':
-        this._loadResolve?.(msg);
-        this._loadResolve = null;
+        if (this._loadResolve) {
+          const r = this._loadResolve;
+          this._loadResolve = null;
+          r(msg);
+        }
         break;
 
       case 'unloaded':
-        this._unloadResolve?.();
-        this._unloadResolve = null;
+        if (this._unloadResolve) {
+          const r = this._unloadResolve;
+          this._unloadResolve = null;
+          r();
+        }
         break;
 
       case 'hookResult': {
@@ -196,6 +292,9 @@ export class PluginHost {
         if (room) room.addMessage(msg.sender, msg.color, msg.text);
         break;
       }
+
+      default:
+        console.warn(`[plugin-host] unknown message type: ${msg?.type}`);
     }
   }
 }
