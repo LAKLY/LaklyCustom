@@ -149,21 +149,21 @@ export class PluginLoader {
   // Встроенные плагины удалять нельзя.
   async uninstall(id) {
     if (typeof id !== 'string' || !id) {
-      throw new Error('Некорректный id плагина');
+      throw new Error('error.plugin_invalid_id');
     }
     if (BUILTIN_PLUGINS.has(id)) {
-      throw new Error('Встроенный плагин нельзя удалить');
+      throw new Error('error.plugin_builtin_protected');
     }
 
     const rec = this.plugins.get(id);
     if (!rec) {
-      throw new Error('Плагин не найден');
+      throw new Error('error.plugin_not_found');
     }
 
     // Проверяем, что dir — именно эта папка в plugins/, а не что-то снаружи.
     const expected = path.join(this.pluginsDir, id);
     if (path.resolve(rec.dir) !== path.resolve(expected)) {
-      throw new Error('Подозрительный путь плагина');
+      throw new Error('error.plugin_path_suspicious');
     }
 
     // Выгружаем worker
@@ -341,7 +341,7 @@ export class PluginLoader {
   async installFromZip(zipPath) {
     const stat = await fs.stat(zipPath);
     if (stat.size > MAX_ZIP_SIZE) {
-      throw new Error(`Архив слишком большой (макс ${MAX_ZIP_SIZE / 1024 / 1024} MB)`);
+      throw new Error('error.zip_too_big');
     }
     const ts = Date.now();
     const tmpDir = path.join(this.pluginsDir, `_install_${ts}`);
@@ -350,13 +350,13 @@ export class PluginLoader {
     try {
       await this._safeExtract(zipPath, tmpDir);
       const pluginRoot = await this._findPluginRoot(tmpDir);
-      if (!pluginRoot) throw new Error('В архиве не найден плагин (manifest.json или index.js)');
+      if (!pluginRoot) throw new Error('error.plugin_not_in_archive');
       const rawManifest = await this._readManifest(pluginRoot);
       const manifest = this._validateManifest(rawManifest, path.basename(pluginRoot));
-      if (!manifest) throw new Error('Невалидный manifest.json');
+      if (!manifest) throw new Error('error.plugin_manifest_invalid');
       const entryPath = path.join(pluginRoot, manifest.entry);
       try { await fs.access(entryPath, fs.constants.R_OK); }
-      catch { throw new Error(`Не найден файл плагина: ${manifest.entry}`); }
+      catch { throw new Error('error.plugin_file_missing'); }
       finalDir = path.join(this.pluginsDir, manifest.id);
       try {
         await fs.access(finalDir);
@@ -390,19 +390,19 @@ export class PluginLoader {
     for (const entry of directory.files) {
       const name = entry.path;
       if (name.includes('..') || path.isAbsolute(name)) {
-        throw new Error(`Подозрительный путь в архиве: ${name}`);
+        throw new Error('error.zip_bad_path');
       }
       const resolved = path.resolve(destDir, name);
       if (!resolved.startsWith(root + path.sep) && resolved !== root) {
-        throw new Error(`Path traversal: ${name}`);
+        throw new Error('error.zip_path_traversal');
       }
       if (entry.type === 'File') {
         const ext = path.extname(name).toLowerCase();
-        if (ext && !ALLOWED_EXT.has(ext)) throw new Error(`Недопустимое расширение: ${name}`);
+        if (ext && !ALLOWED_EXT.has(ext)) throw new Error('error.zip_bad_ext');
         fileCount++;
-        if (fileCount > MAX_FILES) throw new Error('Слишком много файлов');
+        if (fileCount > MAX_FILES) throw new Error('error.zip_too_many_files');
         totalSize += entry.uncompressedSize || 0;
-        if (totalSize > MAX_EXTRACTED_SIZE) throw new Error('Слишком большой распакованный размер');
+        if (totalSize > MAX_EXTRACTED_SIZE) throw new Error('error.zip_too_big_extracted');
         await fs.mkdir(path.dirname(resolved), { recursive: true });
         const content = await entry.buffer();
         await fs.writeFile(resolved, content);

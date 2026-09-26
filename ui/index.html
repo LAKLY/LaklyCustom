@@ -5,6 +5,7 @@
 <title>LaklyCustom</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/host/style.css">
+<script src="/host/i18n.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
@@ -12,12 +13,12 @@
 <!-- ══════════ WELCOME ══════════ -->
 <div id="welcome-screen" class="welcome-screen" hidden>
   <div class="welcome-inner">
-    <img class="welcome-nika" src="/assets/nika/nika-welcome.png" alt="Ника"
+    <img class="welcome-nika" src="/assets/nika/nika-welcome.png" alt=""
          onerror="this.style.display='none'">
     <h1 class="welcome-title">LaklyCustom</h1>
-    <p class="welcome-tagline">Комнаты для друзей. Одна ссылка — и все внутри.</p>
-    <button id="btn-welcome-create" class="btn btn-brand btn-xl">Создать первую комнату</button>
-    <button id="btn-welcome-skip" class="welcome-skip">Настроить позже</button>
+    <p class="welcome-tagline" data-i18n="welcome.tagline">Комнаты для друзей. Одна ссылка — и все внутри.</p>
+    <button id="btn-welcome-create" class="btn btn-brand btn-xl" data-i18n="btn.create_room">Создать первую комнату</button>
+    <button id="btn-welcome-skip" class="welcome-skip" data-i18n="welcome.skip">Настроить позже</button>
   </div>
 </div>
 
@@ -26,7 +27,7 @@
   <div class="loading-inner">
     <img class="loading-nika" src="/assets/nika/nika-working.png" alt=""
          onerror="this.style.display='none'">
-    <div class="loading-text" id="loading-text">Открываем комнату…</div>
+    <div class="loading-text" id="loading-text" data-i18n="loading.opening">Открываем комнату…</div>
     <div class="loading-tip" id="loading-tip"></div>
     <div class="loading-bar"><div class="loading-bar-fill"></div></div>
   </div>
@@ -37,9 +38,9 @@
   <div class="modal-card">
     <img class="modal-nika" src="/assets/nika/nika-alert.png" alt=""
          onerror="this.style.display='none'">
-    <h2 class="modal-title" id="error-title">Не получилось</h2>
+    <h2 class="modal-title" id="error-title" data-i18n="error.title">Не получилось</h2>
     <p class="modal-message" id="error-message"></p>
-    <button class="btn btn-brand" id="error-close">Понятно</button>
+    <button class="btn btn-brand" id="error-close" data-i18n="btn.close">Понятно</button>
   </div>
 </div>
 
@@ -48,14 +49,14 @@
   <div class="modal-card modal-card-wide">
     <h2 class="modal-title" id="config-title">Настройки плагина</h2>
     <p class="modal-message" id="config-hint">
-      Отредактируйте конфиг в формате JSON. Структура должна соответствовать ожиданиям плагина.
+      Отредактируйте конфиг в формате JSON.
     </p>
     <textarea id="config-textarea" class="config-textarea" spellcheck="false"></textarea>
     <div id="config-error" class="config-error"></div>
     <div class="config-actions">
-      <button class="btn btn-ghost" id="config-reset">Сбросить</button>
-      <button class="btn btn-ghost" id="config-cancel">Отмена</button>
-      <button class="btn btn-brand" id="config-save">Сохранить</button>
+      <button class="btn btn-ghost" id="config-reset" data-i18n="btn.reset">Сбросить</button>
+      <button class="btn btn-ghost" id="config-cancel" data-i18n="btn.cancel">Отмена</button>
+      <button class="btn btn-brand" id="config-save" data-i18n="btn.save">Сохранить</button>
     </div>
   </div>
 </div>
@@ -74,28 +75,28 @@
           <rect x="3" y="3" width="18" height="18" rx="3"/>
           <path d="M9 21V9"/>
         </svg>
-        Комната
+        <span data-i18n="nav.room">Комната</span>
       </button>
       <button class="nav-item" data-view="games">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="2" y="6" width="20" height="12" rx="3"/>
           <path d="M6 12h4M8 10v4M16 11h.01M18 13h.01"/>
         </svg>
-        Игры
+        <span data-i18n="nav.games">Игры</span>
       </button>
       <button class="nav-item" data-view="settings">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"/>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
-        Настройки
+        <span data-i18n="nav.settings">Настройки</span>
       </button>
     </nav>
 
     <div class="sidebar-footer">
       <div class="status-pill">
         <span class="status-dot" id="status-dot"></span>
-        <span id="status-text">Не запущено</span>
+        <span id="status-text" data-i18n="status.not_started">Не запущено</span>
       </div>
       <div class="sidebar-version">v1.0.0</div>
     </div>
@@ -105,107 +106,107 @@
     <!-- ══════════ ROOM ══════════ -->
     <section class="view active" data-view="room">
       <div class="room-empty" id="room-empty">
-        <h1 class="hero-title">Запустите комнату</h1>
-        <p class="hero-sub">Выберите режим и создайте комнату — гости подключатся по ссылке.</p>
+        <h1 class="hero-title" data-i18n="room.hero_title">Запустите комнату</h1>
+        <p class="hero-sub" data-i18n="room.hero_sub">Выберите режим и создайте комнату — гости подключатся по ссылке.</p>
 
         <div class="mode-tabs" id="mode-tabs">
           <button class="mode-tab active" data-mode="default">
             <span class="mode-tab-icon">💬</span>
             <span class="mode-tab-body">
-              <strong>Плагин / чат</strong>
-              <em>Лобби с играми и чатом</em>
+              <strong data-i18n="mode.default">Плагин / чат</strong>
+              <em data-i18n="mode.default_desc">Лобби с играми и чатом</em>
             </span>
           </button>
           <button class="mode-tab" data-mode="static">
             <span class="mode-tab-icon">📁</span>
             <span class="mode-tab-body">
-              <strong>Раздать папку</strong>
-              <em>Показать HTML-сайт из папки</em>
+              <strong data-i18n="mode.static">Раздать папку</strong>
+              <em data-i18n="mode.static_desc">Показать HTML-сайт из папки</em>
             </span>
           </button>
           <button class="mode-tab" data-mode="proxy">
             <span class="mode-tab-icon">🔌</span>
             <span class="mode-tab-body">
-              <strong>Прокси порт</strong>
-              <em>Пробросить localhost в интернет</em>
+              <strong data-i18n="mode.proxy">Прокси порт</strong>
+              <em data-i18n="mode.proxy_desc">Пробросить localhost в интернет</em>
             </span>
           </button>
         </div>
 
         <!-- Панель: default -->
         <div class="mode-panel" id="panel-default">
-          <label>Название комнаты</label>
+          <label data-i18n="room.name_label">Название комнаты</label>
           <input id="room-name-default" type="text" value="Lakly Room" maxlength="40">
 
           <label class="checkbox-option" style="margin-top: 4px;">
             <input type="checkbox" id="opt-default-chat" checked>
-            <span>Включить чат в комнате</span>
+            <span data-i18n="room.chat_enabled">Включить чат в комнате</span>
           </label>
 
-          <p class="hint">Игру можно будет запустить сразу после создания комнаты.</p>
-          <button id="btn-start" class="btn btn-brand btn-xl">Создать комнату</button>
+          <p class="hint" data-i18n="panel.hint_default_game">Игру можно будет запустить сразу после создания комнаты.</p>
+          <button id="btn-start" class="btn btn-brand btn-xl" data-i18n="btn.create_room">Создать комнату</button>
         </div>
 
         <!-- Панель: static -->
         <div class="mode-panel" id="panel-static" hidden>
-          <label>Название комнаты</label>
+          <label data-i18n="room.name_label">Название комнаты</label>
           <input id="room-name-static" type="text" value="Мой сайт" maxlength="40">
 
-          <label>Папка с HTML</label>
+          <label data-i18n="panel.folder_label">Папка с HTML</label>
           <div class="row">
-            <input id="static-dir" readonly value="Папка не выбрана">
-            <button id="btn-pick-dir" class="btn">Выбрать…</button>
+            <input id="static-dir" readonly data-i18n-placeholder="panel.folder_none" value="">
+            <button id="btn-pick-dir" class="btn" data-i18n="btn.pick">Выбрать…</button>
           </div>
 
-          <div class="options-head">Настройки раздачи</div>
+          <div class="options-head" data-i18n="panel.options_head.static">Настройки раздачи</div>
           <label class="checkbox-option">
             <input type="checkbox" id="opt-static-spa">
-            <span>SPA fallback — на 404 отдавать index.html</span>
+            <span data-i18n="panel.opt_spa">SPA fallback — на 404 отдавать index.html</span>
           </label>
           <label class="checkbox-option">
             <input type="checkbox" id="opt-static-dotfiles">
-            <span>Отдавать скрытые файлы (начинаются с точки)</span>
+            <span data-i18n="panel.opt_dotfiles">Отдавать скрытые файлы (начинаются с точки)</span>
           </label>
           <label class="checkbox-option">
             <input type="checkbox" id="opt-static-nocache">
-            <span>Отключить кэширование (удобно при разработке)</span>
+            <span data-i18n="panel.opt_nocache">Отключить кэширование (удобно при разработке)</span>
           </label>
 
-          <button id="btn-start-static" class="btn btn-brand btn-xl">Создать комнату</button>
+          <button id="btn-start-static" class="btn btn-brand btn-xl" data-i18n="btn.create_room">Создать комнату</button>
         </div>
 
         <!-- Панель: proxy -->
         <div class="mode-panel" id="panel-proxy" hidden>
-          <label>Название комнаты</label>
+          <label data-i18n="room.name_label">Название комнаты</label>
           <input id="room-name-proxy" type="text" value="Dev Preview" maxlength="40">
 
-          <label>Порт локального приложения</label>
+          <label data-i18n="panel.proxy.port_label">Порт локального приложения</label>
           <div class="row">
             <input id="proxy-port" type="number" min="1" max="65535" placeholder="5173" value="5173">
-            <button id="btn-check-port" class="btn">Проверить</button>
-            <button id="btn-scan-ports" class="btn">Найти</button>
+            <button id="btn-check-port" class="btn" data-i18n="btn.check">Проверить</button>
+            <button id="btn-scan-ports" class="btn" data-i18n="btn.scan">Найти</button>
           </div>
           <p id="proxy-status" class="hint"></p>
-          <p class="hint">Vite — 5173 · Next — 3000/3001 · Angular — 4200 · Live Server — 5500 · Django — 8000.</p>
+          <p class="hint" data-i18n="panel.proxy.hint_ports">Vite — 5173 · Next — 3000/3001 · Angular — 4200 · Live Server — 5500 · Django — 8000.</p>
 
-          <div class="options-head">Настройки прокси</div>
+          <div class="options-head" data-i18n="panel.proxy.options_head">Настройки прокси</div>
           <label class="checkbox-option">
             <input type="checkbox" id="opt-proxy-ws" checked>
-            <span>Пробрасывать WebSocket (Vite HMR, live-reload)</span>
+            <span data-i18n="panel.proxy.opt_ws">Пробрасывать WebSocket (Vite HMR, live-reload)</span>
           </label>
           <label class="checkbox-option">
             <input type="checkbox" id="opt-proxy-origin" checked>
-            <span>Подменять Host на localhost (changeOrigin)</span>
+            <span data-i18n="panel.proxy.opt_origin">Подменять Host на localhost (changeOrigin)</span>
           </label>
           <label class="checkbox-option">
             <input type="checkbox" id="opt-proxy-insecure">
-            <span>Игнорировать ошибки SSL-сертификата</span>
+            <span data-i18n="panel.proxy.opt_insecure">Игнорировать ошибки SSL-сертификата</span>
           </label>
 
-          <label style="margin-top:12px;">Таймаут, сек</label>
+          <label style="margin-top:12px;" data-i18n="panel.proxy.timeout_label">Таймаут, сек</label>
           <input id="opt-proxy-timeout" type="number" min="1" max="300" value="20">
 
-          <button id="btn-start-proxy" class="btn btn-brand btn-xl">Создать комнату</button>
+          <button id="btn-start-proxy" class="btn btn-brand btn-xl" data-i18n="btn.create_room">Создать комнату</button>
         </div>
       </div>
 
@@ -213,40 +214,41 @@
       <div class="room-active" id="room-active" hidden>
         <div class="room-hero">
           <div class="room-hero-qr">
-            <div class="qr" id="qr"><div class="qr-empty">QR появится здесь</div></div>
+            <div class="qr" id="qr"><div class="qr-empty" data-i18n="room.qr_empty">QR появится здесь</div></div>
           </div>
           <div class="room-hero-info">
-            <div class="room-badge" id="room-badge">Комната активна</div>
-            <h1 class="room-hero-title" id="room-hero-title">Отправьте ссылку друзьям</h1>
+            <div class="room-badge" id="room-badge" data-i18n="room.badge.active">Комната активна</div>
+            <h1 class="room-hero-title" id="room-hero-title" data-i18n="room.send_link">Отправьте ссылку друзьям</h1>
             <div class="url-box">
               <input id="room-url" readonly value="—">
-              <button id="btn-copy" class="btn">Копировать</button>
+              <button id="btn-copy" class="btn" data-i18n="btn.copy">Копировать</button>
             </div>
             <div class="room-hero-actions">
-              <button id="btn-join-guest" class="btn">Открыть как гость</button>
-              <button id="btn-stop" class="btn btn-ghost-danger">Закрыть комнату</button>
+              <button id="btn-join-guest" class="btn" data-i18n="btn.open_as_guest">Открыть как гость</button>
+              <button id="btn-stop" class="btn btn-ghost-danger" data-i18n="btn.close_room">Закрыть комнату</button>
             </div>
           </div>
         </div>
 
-        <!-- Блок для default (лобби + игра + чат) -->
+        <!-- Блок для default -->
         <div class="room-content" id="room-content-default">
           <div class="room-grid">
             <div class="section">
               <div class="section-head">
-                <h2>Игроки</h2>
+                <h2 data-i18n="room.players">Игроки</h2>
                 <span class="badge" id="player-count">0</span>
               </div>
               <div id="players" class="players-list">
-                <div class="muted-text">Пока никого</div>
+                <div class="muted-text" data-i18n="room.no_players">Пока никого</div>
               </div>
             </div>
 
             <div class="section">
               <div class="section-head">
-                <h2>Игра</h2>
-                <span class="game-status" id="game-status">Не запущена</span>
+                <h2 data-i18n="room.game">Игра</h2>
+                <span class="game-status" id="game-status" data-i18n="room.game_not_started">Не запущена</span>
                 <button id="btn-game-fullscreen" class="game-fs-btn" type="button"
+                        data-i18n-title="room.game_fullscreen" data-i18n-aria="room.game_fullscreen"
                         title="На весь экран" aria-label="На весь экран" hidden>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                        stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
@@ -256,10 +258,10 @@
               </div>
               <div class="game-controls">
                 <select id="plugin-select">
-                  <option value="">— Выбрать игру —</option>
+                  <option value="" data-i18n="room.game_select">— Выбрать игру —</option>
                 </select>
-                <button id="btn-game-start" class="btn btn-brand" disabled>Запустить</button>
-                <button id="btn-game-stop" class="btn btn-ghost" hidden>Остановить</button>
+                <button id="btn-game-start" class="btn btn-brand" disabled data-i18n="btn.start">Запустить</button>
+                <button id="btn-game-stop" class="btn btn-ghost" hidden data-i18n="btn.stop">Остановить</button>
               </div>
               <div class="game-frame-wrap" id="game-frame-wrap" hidden>
                 <iframe id="game-frame" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
@@ -268,12 +270,12 @@
           </div>
 
           <div class="section chat-section">
-            <div class="section-head"><h2>Чат</h2></div>
+            <div class="section-head"><h2 data-i18n="room.chat">Чат</h2></div>
             <div id="chat" class="chat-list">
-              <div class="muted-text">Сообщений пока нет</div>
+              <div class="muted-text" data-i18n="room.no_messages">Сообщений пока нет</div>
             </div>
             <div class="chat-input-row">
-              <input id="chat-input" placeholder="Написать сообщение…" disabled>
+              <input id="chat-input" data-i18n-placeholder="room.chat_placeholder" placeholder="Написать сообщение…" disabled>
               <button id="btn-send" class="btn btn-brand" disabled>→</button>
             </div>
           </div>
@@ -283,28 +285,28 @@
         <div class="room-content" id="room-content-static" hidden>
           <div class="section">
             <div class="section-head">
-              <h2>Раздаётся папка</h2>
-              <span class="badge" id="static-visitors">0 гостей</span>
+              <h2 data-i18n="info.folder_shared">Раздаётся папка</h2>
+              <span class="badge" id="static-visitors">0</span>
             </div>
             <div class="info-card">
               <div class="info-row">
-                <span class="info-label">Путь</span>
+                <span class="info-label" data-i18n="info.path">Путь</span>
                 <span class="info-value" id="static-path-display">—</span>
               </div>
               <div class="info-row">
-                <span class="info-label">SPA fallback</span>
+                <span class="info-label" data-i18n="info.spa">SPA fallback</span>
                 <span class="info-value" id="static-spa-display">—</span>
               </div>
               <div class="info-row">
-                <span class="info-label">Кэш</span>
+                <span class="info-label" data-i18n="info.cache">Кэш</span>
                 <span class="info-value" id="static-cache-display">—</span>
               </div>
               <div class="info-row">
-                <span class="info-label">Скрытые файлы</span>
+                <span class="info-label" data-i18n="info.dotfiles">Скрытые файлы</span>
                 <span class="info-value" id="static-dotfiles-display">—</span>
               </div>
             </div>
-            <p class="hint">Гости увидят ваш HTML-сайт напрямую. Чат и игры в этом режиме недоступны.</p>
+            <p class="hint" data-i18n="info.hint_static">Гости увидят ваш HTML-сайт напрямую. Чат и игры в этом режиме недоступны.</p>
           </div>
         </div>
 
@@ -312,28 +314,28 @@
         <div class="room-content" id="room-content-proxy" hidden>
           <div class="section">
             <div class="section-head">
-              <h2>Проксирование</h2>
-              <span class="badge" id="proxy-visitors">0 гостей</span>
+              <h2 data-i18n="info.proxy_shared">Проксирование</h2>
+              <span class="badge" id="proxy-visitors">0</span>
             </div>
             <div class="info-card">
               <div class="info-row">
-                <span class="info-label">Куда</span>
+                <span class="info-label" data-i18n="info.target">Куда</span>
                 <span class="info-value" id="proxy-target-display">—</span>
               </div>
               <div class="info-row">
-                <span class="info-label">WebSocket</span>
+                <span class="info-label" data-i18n="info.ws">WebSocket</span>
                 <span class="info-value" id="proxy-ws-display">—</span>
               </div>
               <div class="info-row">
-                <span class="info-label">changeOrigin</span>
+                <span class="info-label" data-i18n="info.change_origin">changeOrigin</span>
                 <span class="info-value" id="proxy-origin-display">—</span>
               </div>
               <div class="info-row">
-                <span class="info-label">Таймаут</span>
+                <span class="info-label" data-i18n="info.timeout">Таймаут</span>
                 <span class="info-value" id="proxy-timeout-display">—</span>
               </div>
             </div>
-            <p class="hint">Гости увидят ваше локальное приложение. Чат и игры в этом режиме недоступны.</p>
+            <p class="hint" data-i18n="info.hint_proxy">Гости увидят ваше локальное приложение. Чат и игры в этом режиме недоступны.</p>
           </div>
         </div>
       </div>
@@ -343,16 +345,16 @@
     <section class="view" data-view="games">
       <header class="view-head">
         <div>
-          <h1>Игры</h1>
-          <p class="view-sub">Плагины, которые можно запускать в комнате.</p>
+          <h1 data-i18n="games.title">Игры</h1>
+          <p class="view-sub" data-i18n="games.subtitle">Плагины, которые можно запускать в комнате.</p>
         </div>
-        <button id="btn-install-plugin" class="btn btn-brand">Установить плагин</button>
+        <button id="btn-install-plugin" class="btn btn-brand" data-i18n="btn.install_plugin">Установить плагин</button>
       </header>
 
       <div id="plugins-grid" class="plugins-grid">
         <button class="plugin-add-tile" id="plugin-add-tile">
           <span class="add-icon">+</span>
-          <span>Добавить плагин</span>
+          <span data-i18n="games.add">Добавить плагин</span>
         </button>
       </div>
     </section>
@@ -361,46 +363,61 @@
     <section class="view" data-view="settings">
       <header class="view-head">
         <div>
-          <h1>Настройки</h1>
-          <p class="view-sub">Тонкая настройка приложения.</p>
+          <h1 data-i18n="settings.title">Настройки</h1>
+          <p class="view-sub" data-i18n="settings.subtitle">Тонкая настройка приложения.</p>
         </div>
       </header>
 
       <div class="settings-group">
-        <div class="settings-group-title">Подключение</div>
+        <div class="settings-group-title" data-i18n="settings.group_language">Язык интерфейса</div>
         <div class="settings-row">
           <div class="settings-label">
-            <span>Провайдер туннеля</span>
-            <span class="settings-hint">Как друзья подключаются к комнате.</span>
+            <span data-i18n="settings.language">Язык интерфейса</span>
+            <span class="settings-hint" data-i18n="settings.language_hint">Применяется сразу</span>
           </div>
-          <select id="set-tunnel">
-            <option value="auto">Авто (Cloudflare → ngrok → локально)</option>
-            <option value="cloudflare">Cloudflare</option>
-            <option value="ngrok">ngrok</option>
-            <option value="none">Только локально</option>
+          <select id="set-language">
+            <option value="auto" data-i18n="settings.language_auto">Автоматически</option>
+            <option value="ru" data-i18n="settings.language_ru">Русский</option>
+            <option value="en" data-i18n="settings.language_en">English</option>
           </select>
-        </div>
-        <div class="settings-row">
-          <div class="settings-label">
-            <span>ngrok authtoken</span>
-            <span class="settings-hint">Нужен только для ngrok.</span>
-          </div>
-          <input id="set-ngrok-token" type="password" placeholder="Опционально">
         </div>
       </div>
 
       <div class="settings-group">
-        <div class="settings-group-title">Сервер</div>
+        <div class="settings-group-title" data-i18n="settings.group_connection">Подключение</div>
         <div class="settings-row">
           <div class="settings-label">
-            <span>Локальный порт</span>
-            <span class="settings-hint">Изменение применится после перезапуска.</span>
+            <span data-i18n="settings.tunnel_provider">Провайдер туннеля</span>
+            <span class="settings-hint" data-i18n="settings.tunnel_hint">Как друзья подключаются к комнате.</span>
+          </div>
+          <select id="set-tunnel">
+            <option value="auto" data-i18n="settings.tunnel_auto">Авто (Cloudflare → ngrok → локально)</option>
+            <option value="cloudflare" data-i18n="settings.tunnel_cloudflare">Cloudflare</option>
+            <option value="ngrok" data-i18n="settings.tunnel_ngrok">ngrok</option>
+            <option value="none" data-i18n="settings.tunnel_none">Только локально</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <div class="settings-label">
+            <span data-i18n="settings.ngrok_token">ngrok authtoken</span>
+            <span class="settings-hint" data-i18n="settings.ngrok_hint">Нужен только для ngrok.</span>
+          </div>
+          <input id="set-ngrok-token" type="password" data-i18n-placeholder="settings.ngrok_placeholder" placeholder="Опционально">
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title" data-i18n="settings.group_server">Сервер</div>
+        <div class="settings-row">
+          <div class="settings-label">
+            <span data-i18n="settings.port">Локальный порт</span>
+            <span class="settings-hint" data-i18n="settings.port_hint">Изменение применится после перезапуска.</span>
           </div>
           <input id="set-port" type="number" min="1" max="65535" value="3000">
         </div>
       </div>
 
-      <button id="btn-save-settings" class="btn btn-brand">Сохранить</button>
+      <button id="btn-save-settings" class="btn btn-brand" data-i18n="btn.save">Сохранить</button>
     </section>
   </main>
 </div>
@@ -409,21 +426,21 @@
 <div class="drop-zone-overlay" id="drop-overlay">
   <div class="drop-zone-inner">
     <div class="drop-zone-icon">📦</div>
-    <div class="drop-zone-title">Отпустите ZIP-архив</div>
-    <div class="drop-zone-sub">Плагин установится автоматически</div>
+    <div class="drop-zone-title" data-i18n="drop.title">Отпустите ZIP-архив</div>
+    <div class="drop-zone-sub" data-i18n="drop.sub">Плагин установится автоматически</div>
   </div>
 </div>
 
 <!-- ══════════ NIKA ASSISTANT ══════════ -->
 <div id="nika-notify" class="nika-notify">
   <div class="nika-bubble" id="nika-bubble">
-    <span id="nika-message">Привет</span>
+    <span id="nika-message" data-i18n="nika.hello">Привет</span>
   </div>
   <img class="nika-notify-img" id="nika-img" src="/assets/nika/nika-idle.png" alt=""
        onerror="this.style.display='none'">
 </div>
 
 <div id="toast" class="toast"></div>
-<script src="/host/app.js?v=1.0.5"></script>
+<script src="/host/app.js?v=1.0.7"></script>
 </body>
 </html>

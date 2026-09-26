@@ -23,6 +23,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const PROXY_CHECK_RATE = { max: 30, windowMs: 60_000 };
 
+// ─── Мини-i18n для сервера (HTTP ошибки) ───────────────────
+// Серверные ошибки в socket.io шлём ключами — клиент переведёт сам.
+// HTTP-ответы JSON тоже ключами — UI/guest переведёт сам.
+// Единственное где нужен переведённый текст на сервере —
+// это HTML страница ошибки прокси (см. core/proxy.js).
 function buildCorsOrigin() {
   return (origin, cb) => {
     if (!origin) return cb(null, true);
@@ -64,11 +69,6 @@ export async function startServer({
 
   app.use(express.json({ limit: '128kb' }));
 
-  // ВАЖНО: путь к плагинам вычисляем здесь, внутри startServer, а не на
-  // верхнем уровне модуля. Верхнеуровневый код ESM выполняется ДО того,
-  // как electron/main.js успевает выставить process.env.LAKLY_RESOURCES,
-  // поэтому константа на уровне модуля получала dev-путь — в собранном
-  // приложении это указывало внутрь app.asar и давало ENOTDIR.
   const pluginsDir = process.env.LAKLY_RESOURCES
     ? path.join(process.env.LAKLY_RESOURCES, 'plugins')
     : path.join(ROOT, 'plugins');
@@ -126,11 +126,25 @@ export async function startServer({
     res.json({ plugins: pluginLoader.list() });
   });
 
+  // ─── i18n ───────────────────────────────────────────────────
+  const localesDir = process.env.LAKLY_RESOURCES
+    ? path.join(process.env.LAKLY_RESOURCES, 'shared', 'locales')
+    : path.join(ROOT, 'shared', 'locales');
+  app.use('/locales', express.static(localesDir, {
+    etag: true,
+    lastModified: true,
+    maxAge: '1h',
+  }));
+
+  app.get('/api/language', (_req, res) => {
+    res.json({ language: process.env.LAKLY_LANG || 'ru' });
+  });
+
   // ─── Конфиг плагина ────────────────────────────────────────
   app.get('/api/plugins/:id/config', async (req, res) => {
     try {
       const { id } = req.params;
-      if (!pluginLoader.get(id)) return res.status(404).json({ error: 'plugin not found' });
+      if (!pluginLoader.get(id)) return res.status(404).json({ error: 'error.plugin_not_found' });
       const { config, isDefault } = await pluginLoader.readConfig(id);
       res.json({ config, isDefault });
     } catch (e) {
@@ -141,10 +155,10 @@ export async function startServer({
   app.put('/api/plugins/:id/config', async (req, res) => {
     try {
       const { id } = req.params;
-      if (!pluginLoader.get(id)) return res.status(404).json({ error: 'plugin not found' });
+      if (!pluginLoader.get(id)) return res.status(404).json({ error: 'error.plugin_not_found' });
       const body = req.body?.config;
       if (!body || typeof body !== 'object') {
-        return res.status(400).json({ error: 'config должен быть объектом' });
+        return res.status(400).json({ error: 'error.config_must_be_object' });
       }
       await pluginLoader.saveConfig(id, body);
       await pluginLoader.reloadOne(id);
@@ -156,18 +170,17 @@ export async function startServer({
 
   app.delete('/api/plugins/:id', async (req, res) => {
     if (!isLocalRequest(req)) {
-      return res.status(403).json({ error: 'forbidden' });
+      return res.status(403).json({ error: 'error.forbidden' });
     }
     try {
       const { id } = req.params;
       if (!pluginLoader.get(id)) {
-        return res.status(404).json({ error: 'plugin not found' });
+        return res.status(404).json({ error: 'error.plugin_not_found' });
       }
       if (pluginLoader.isBuiltin(id)) {
-        return res.status(400).json({ error: 'Встроенный плагин нельзя удалить' });
+        return res.status(400).json({ error: 'error.plugin_builtin_protected' });
       }
 
-      // Если этот плагин сейчас активен в комнате — сначала корректно стопаем игру.
       const room = roomManager.findActive();
       if (room && room.activePluginName === id && room.gameActive) {
         try { await room.stopGame(); } catch (e) {
@@ -184,7 +197,7 @@ export async function startServer({
 
   app.get('/api/qr', async (_req, res) => {
     const first = roomManager.findActive();
-    if (!first || !first.publicUrl) return res.status(400).json({ error: 'no room' });
+    if (!first || !first.publicUrl) return res.status(400).json({ error: 'error.no_room' });
     try {
       const qr = await QRCode.toDataURL(first.publicUrl, { margin: 1, width: 260 });
       res.json({ qr });
@@ -194,32 +207,32 @@ export async function startServer({
   // ─── Proxy probe ───────────────────────────────────────────
   app.post('/api/proxy/check', async (req, res) => {
     if (!isLocalRequest(req)) {
-      return res.status(403).json({ ok: false, error: 'forbidden' });
+      return res.status(403).json({ ok: false, error: 'error.forbidden' });
     }
     const ip = req.ip || 'unknown';
     if (!limiter.check(`proxy-check:${ip}`, PROXY_CHECK_RATE)) {
-      return res.status(429).json({ ok: false, error: 'Слишком часто' });
+      return res.status(429).json({ ok: false, error: 'error.too_fast' });
     }
     const p = Number(req.body?.port);
     if (!Number.isInteger(p) || p < 1 || p > 65535) {
-      return res.status(400).json({ ok: false, error: 'Некорректный порт' });
+      return res.status(400).json({ ok: false, error: 'error.invalid_port' });
     }
     if (p === httpServer.address()?.port) {
-      return res.json({ ok: false, error: 'Это порт самого LaklyCustom' });
+      return res.json({ ok: false, error: 'error.own_port' });
     }
     const open = await isPortOpen(p);
-    if (!open) return res.json({ ok: false, error: 'Порт закрыт' });
+    if (!open) return res.json({ ok: false, error: 'error.port_closed', vars: { port: p } });
     const probe = await probePort(p);
     return res.json({ ok: true, port: p, hint: describePort(p), probe });
   });
 
   app.get('/api/proxy/scan', async (req, res) => {
     if (!isLocalRequest(req)) {
-      return res.status(403).json({ error: 'forbidden' });
+      return res.status(403).json({ error: 'error.forbidden' });
     }
     const ip = req.ip || 'unknown';
     if (!limiter.check(`proxy-scan:${ip}`, PROXY_CHECK_RATE)) {
-      return res.status(429).json({ error: 'Слишком часто' });
+      return res.status(429).json({ error: 'error.too_fast' });
     }
     try {
       const list = await scanPorts();
@@ -230,9 +243,6 @@ export async function startServer({
   // ─── Статика ────────────────────────────────────────────────
   app.use('/host', express.static(path.join(ROOT, 'ui'), noCache));
   app.use('/assets', express.static(path.join(ROOT, 'assets'), noCache));
-  // Статика плагинов регистрируется динамически, а не при старте:
-  // плагины можно ставить и удалять в рантайме, express.static на старте
-  // их бы не увидел (или держал бы ссылку на удалённую папку).
   app.use('/plugins/:pluginId', (req, res, next) => {
     const plugin = pluginLoader.get(req.params.pluginId);
     if (!plugin) return next();
@@ -294,7 +304,7 @@ export async function startServer({
 
     socket.on('host:create-room', async (payload = {}) => {
       if (!limiter.check(`create:${ip}`, RATE_LIMITS.CREATE_ROOM)) {
-        socket.emit('error', 'Слишком часто. Подождите минуту.');
+        socket.emit('error', 'error.too_fast');
         return;
       }
       const name = validateRoomName(payload.roomName);
@@ -307,37 +317,36 @@ export async function startServer({
 
       if (requestedType === 'static') {
         if (typeof payload.staticDir !== 'string' || !payload.staticDir) {
-          socket.emit('error', 'Не выбрана папка для статики'); return;
+          socket.emit('error', 'error.folder_not_selected'); return;
         }
         if (!isAllowedStaticDir(payload.staticDir)) {
           console.warn('[static] отклонён незарегистрированный путь:', payload.staticDir);
-          socket.emit('error', 'Эта папка не была выбрана через диалог'); return;
+          socket.emit('error', 'error.folder_not_allowed'); return;
         }
         try {
           const st = await fs.stat(payload.staticDir);
           if (!st.isDirectory()) throw new Error('not a directory');
-        } catch { socket.emit('error', 'Папка не найдена'); return; }
+        } catch { socket.emit('error', 'error.folder_not_found'); return; }
         staticDir = payload.staticDir;
       } else if (requestedType === 'proxy') {
         const p = Number(payload.proxyPort);
         if (!Number.isInteger(p) || p < 1 || p > 65535) {
-          socket.emit('error', 'Некорректный порт'); return;
+          socket.emit('error', 'error.invalid_port'); return;
         }
         if (p === httpServer.address()?.port) {
-          socket.emit('error', 'Нельзя проксировать собственный порт LaklyCustom'); return;
+          socket.emit('error', 'error.own_port'); return;
         }
         if (!(await isPortOpen(p))) {
-          socket.emit('error', `Порт ${p} закрыт — приложение не запущено?`); return;
+          socket.emit('error', { key: 'error.port_closed', vars: { port: p } }); return;
         }
         proxyPort = p;
       } else {
         pluginName = payload.pluginName ? validatePluginId(payload.pluginName) : null;
         if (pluginName && !pluginLoader.get(pluginName)) {
-          socket.emit('error', 'Такого плагина нет'); return;
+          socket.emit('error', 'error.plugin_not_found'); return;
         }
       }
 
-      // Поднимаем супервизор один раз за жизнь процесса.
       if (!tunnelSupervisor) {
         tunnelSupervisor = new TunnelSupervisor({
           port: httpServer.address().port,
@@ -346,14 +355,18 @@ export async function startServer({
             if (!activeRoom) return;
             activeRoom.publicUrl = `${newUrl}?t=${activeRoom.joinToken}`;
 
-            // Хосту — новый URL + провайдер
             io.to(activeRoom.hostSocketId).emit('host:room-url-changed', {
               publicUrl: activeRoom.publicUrl,
               provider,
             });
-            // Гостям — мягкое уведомление
             activeRoom.broadcast('room:url-changed', { provider });
-            activeRoom.addMessage('Система', '#63D8FF', 'Ссылка комнаты обновлена');
+
+            // Системное сообщение в чат — ключи + null-имя, клиент переведёт.
+            activeRoom.addMessage(
+              { key: 'chat.system_name' },
+              '#63D8FF',
+              { key: 'chat.link_updated' }
+            );
           },
           onStateChange: (state) => {
             const activeRoom = roomManager.findActive();
@@ -364,7 +377,6 @@ export async function startServer({
         await tunnelSupervisor.start();
       }
 
-      // Если супервизор сейчас пересоздаёт туннель — подождём немного.
       let tunnelUrl = tunnelSupervisor.url;
       if (!tunnelUrl) tunnelUrl = await tunnelSupervisor.waitForReady(15_000);
 
@@ -373,7 +385,6 @@ export async function startServer({
         type: requestedType, staticDir, proxyPort, options,
       });
 
-      // Всегда используем актуальный URL супервизора.
       const currentUrl = tunnelSupervisor.url || `http://localhost:${httpServer.address().port}`;
       room.publicUrl = `${currentUrl}?t=${room.joinToken}`;
 
@@ -397,7 +408,6 @@ export async function startServer({
       hooks.onRoomClosed?.();
     });
 
-    // Ручной форс-рестарт туннеля (из трея или из UI).
     socket.on('host:restart-tunnel', async () => {
       const room = roomManager.getRoomBySocket(socket.id);
       if (!room || room.hostSocketId !== socket.id) return;
@@ -420,18 +430,18 @@ export async function startServer({
 
     socket.on('player:join', async (payload = {}) => {
       if (!limiter.check(`join:${ip}`, RATE_LIMITS.JOIN)) {
-        socket.emit('error', 'Слишком много попыток входа'); return;
+        socket.emit('error', 'error.too_many_joins'); return;
       }
       const name = validatePlayerName(payload.playerName);
-      if (!name) { socket.emit('error', 'Имя должно быть от 1 до 24 символов'); return; }
+      if (!name) { socket.emit('error', 'error.invalid_name'); return; }
 
       const roomId = typeof payload.roomId === 'string' ? payload.roomId : null;
       const room = roomId ? roomManager.getRoom(roomId) : roomManager.findActive();
-      if (!room || !room.isActive) { socket.emit('error', 'Комната не активна'); return; }
+      if (!room || !room.isActive) { socket.emit('error', 'error.room_closed'); return; }
 
       const token = typeof payload.token === 'string' ? payload.token : '';
       if (room.joinToken && token !== room.joinToken) {
-        socket.emit('error', 'Ссылка недействительна'); return;
+        socket.emit('error', 'error.invalid_link'); return;
       }
 
       roomManager.bind(socket.id, room.id);
@@ -443,14 +453,15 @@ export async function startServer({
       if (!limiter.check(`chat:${socket.id}`, RATE_LIMITS.CHAT)) return;
       const room = roomManager.getRoomBySocket(socket.id);
       if (!room) return;
-      // Чат отключён хостом при создании комнаты.
       if (room.options?.chatEnabled === false) return;
       const text = validateChatMessage(payload.text);
       if (!text) return;
       const p = room.players.get(socket.id);
       const isHost = socket.id === room.hostSocketId;
       if (!p && !isHost) return;
-      room.addMessage(p?.name || 'Хост', p?.color || '#E5384F', text);
+      // Имя хоста — тоже ключ (клиент подставит перевод)
+      const senderName = p?.name || { key: 'room.host_name' };
+      room.addMessage(senderName, p?.color || '#E5384F', text);
     });
 
     socket.on('host:start-game', async (payload = {}) => {

@@ -3,6 +3,7 @@ import {
   app, BrowserWindow, shell, Tray, Menu, nativeImage, ipcMain, Notification, dialog, globalShortcut,
 } from 'electron';
 import { startServer } from '../core/server.js';
+import { createTranslator, resolveLanguage } from '../shared/i18n.js';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
@@ -28,7 +29,7 @@ bootLog(`boot log: ${BOOT_LOG}`);
 process.on('exit', (code) => bootLog(`=== process exit code=${code} ===`));
 process.on('uncaughtException', (e) => bootLog(`uncaught: ${e?.stack || e}`));
 
-// ─── Перехват console.* → bootLog (main + core) ───────────────
+// ─── Перехват console.* → bootLog ─────────────────────────────
 const _origLog   = console.log.bind(console);
 const _origWarn  = console.warn.bind(console);
 const _origError = console.error.bind(console);
@@ -74,6 +75,7 @@ const DEFAULT_SETTINGS = {
   ngrokToken: '',
   hasSeenWelcome: false,
   allowedStaticDirs: [],
+  language: 'auto',
 };
 
 async function readSettings() {
@@ -101,7 +103,7 @@ ipcMain.handle('settings:set', async (_e, data) => {
 });
 
 ipcMain.handle('plugin:install-zip', async (_e, zipPath) => {
-  if (!srv) return { ok: false, error: 'Сервер не запущен' };
+  if (!srv) return { ok: false, error: 'dialog.server_not_running' };
   try {
     const name = await srv.plugins.installFromZip(zipPath);
     return { ok: true, plugin: name };
@@ -112,7 +114,7 @@ ipcMain.handle('plugin:install-zip', async (_e, zipPath) => {
 
 ipcMain.handle('dialog:pick-directory', async () => {
   const result = await dialog.showOpenDialog(win, {
-    title: 'Выберите папку с HTML',
+    title: tMain('dialog.pick_folder_title'),
     properties: ['openDirectory'],
   });
   if (result.canceled || !result.filePaths.length) return null;
@@ -134,6 +136,35 @@ ipcMain.handle('shell:open-path', async (_e, p) => {
   if (typeof p !== 'string') return false;
   try { await shell.openPath(p); return true; } catch { return false; }
 });
+
+// ─── i18n для main-процесса ───────────────────────────────────
+let tMain = (key, vars) => {
+  if (!vars) return key;
+  let s = key;
+  for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(String(v));
+  return s;
+};
+
+function loadMainTranslator(lang) {
+  try {
+    const localesDir = app.isPackaged
+      ? path.join(process.resourcesPath, 'shared', 'locales')
+      : path.join(__dirname, '..', 'shared', 'locales');
+
+    const dictPath = path.join(localesDir, `${lang}.json`);
+    const fallbackPath = path.join(localesDir, 'en.json');
+
+    const dict = JSON.parse(fsSync.readFileSync(dictPath, 'utf8'));
+    const fallback = lang === 'en'
+      ? {}
+      : JSON.parse(fsSync.readFileSync(fallbackPath, 'utf8'));
+
+    tMain = createTranslator(dict, fallback);
+    bootLog(`[i18n] main translator loaded: ${lang}`);
+  } catch (err) {
+    bootLog(`[i18n] main translator FAILED: ${err.message}`);
+  }
+}
 
 // ─── Иконки ───────────────────────────────────────────────────
 function loadIcon(relativePath) {
@@ -195,8 +226,8 @@ function applyTrayUpdate() {
   }
 
   const tooltip = roomActive
-    ? `LaklyCustom\nКомната активна · игроков: ${playerCount}`
-    : 'LaklyCustom\nКомната не запущена';
+    ? tMain('tray.tooltip_active', { count: playerCount })
+    : tMain('tray.tooltip_idle');
   if (tooltip !== trayMemo.tooltip) {
     tray.setToolTip(tooltip);
     trayMemo.tooltip = tooltip;
@@ -211,25 +242,21 @@ function applyTrayUpdate() {
 
 function buildTrayMenu() {
   const items = [
-    { label: 'Открыть окно', click: () => win?.show() },
+    { label: tMain('tray.show'), click: () => win?.show() },
     { type: 'separator' },
   ];
   if (roomActive) {
     items.push(
-      { label: 'Копировать ссылку', click: () => win?.webContents.send('tray:action', 'copy-link') },
-      { label: 'Открыть как гость', click: () => win?.webContents.send('tray:action', 'open-guest') },
-      { label: 'Закрыть комнату', click: () => win?.webContents.send('tray:action', 'close-room') },
+      { label: tMain('tray.copy_link'), click: () => win?.webContents.send('tray:action', 'copy-link') },
+      { label: tMain('tray.open_guest'), click: () => win?.webContents.send('tray:action', 'open-guest') },
+      { label: tMain('tray.close_room'), click: () => win?.webContents.send('tray:action', 'close-room') },
     );
   } else {
-    items.push({ label: 'Создать комнату', click: () => win?.webContents.send('tray:action', 'create-room') });
+    items.push({ label: tMain('tray.create_room'), click: () => win?.webContents.send('tray:action', 'create-room') });
   }
   items.push(
     { type: 'separator' },
-    { label: 'Горячие клавиши', enabled: false },
-    { label: '  Ctrl+Alt+L — показать окно', enabled: false },
-    { label: '  Ctrl+Alt+C — создать комнату', enabled: false },
-    { type: 'separator' },
-    { label: 'Выход', click: () => { app.isQuitting = true; app.quit(); } },
+    { label: tMain('tray.quit'), click: () => { app.isQuitting = true; app.quit(); } },
   );
   return items;
 }
@@ -270,21 +297,26 @@ const serverHooks = {
   onPlayerJoin(player) {
     playerCount++;
     refreshTray();
-    notify('Новый игрок', `${player.name} подключился к комнате`);
+    notify(
+      tMain('notify.player_joined_title'),
+      tMain('notify.player_joined_body', { name: player.name })
+    );
   },
   onPlayerLeave(player) {
     playerCount = Math.max(0, playerCount - 1);
     refreshTray();
-    if (player?.name) notify('Игрок вышел', `${player.name} покинул комнату`);
+    if (player?.name) {
+      notify(
+        tMain('notify.player_left_title'),
+        tMain('notify.player_left_body', { name: player.name })
+      );
+    }
   },
   onRoomCreated() { roomActive = true; playerCount = 0; refreshTray(); },
   onRoomClosed() { roomActive = false; playerCount = 0; refreshTray(); },
 };
 
-// ─── Принудительное убийство дерева процессов (Windows) ───────
-// Electron плодит 4-5 процессов (main, GPU, renderer, utility, crashpad),
-// все называются LaklyCustom.exe. Если что-то висит — taskkill /T /F
-// убьёт всё дерево разом.
+// ─── Принудительное убийство дерева процессов ─────────────────
 function killProcessTree() {
   if (process.platform !== 'win32') return;
   try {
@@ -316,6 +348,13 @@ async function bootstrap() {
     if (typeof dir === 'string') allowedStaticDirs.add(dir);
   }
 
+  // ─── Язык ────────────────────────────────────────────────────
+  const browserLang = app.getLocale ? app.getLocale() : 'en';
+  const resolvedLang = resolveLanguage(settings.language || 'auto', browserLang);
+  process.env.LAKLY_LANG = resolvedLang;
+  loadMainTranslator(resolvedLang);
+  bootLog(`bootstrap: language=${resolvedLang} (setting=${settings.language || 'auto'}, os=${browserLang})`);
+
   const port = Number(settings.port) || 3000;
   bootLog(`bootstrap: calling startServer port=${port}`);
 
@@ -329,7 +368,10 @@ async function bootstrap() {
     bootLog(`bootstrap: server started on port ${srv.port}`);
   } catch (err) {
     bootLog(`bootstrap: server FAILED: ${err?.stack || err}`);
-    dialog.showErrorBox('Сервер не запустился', `Порт: ${port}\n\n${err?.stack || err?.message || err}`);
+    dialog.showErrorBox(
+      tMain('dialog.server_failed_title'),
+      tMain('dialog.server_failed_body', { port, error: err?.stack || err?.message || err })
+    );
     app.exit(1);
     return;
   }
@@ -356,14 +398,11 @@ async function bootstrap() {
   win.setMenuBarVisibility(false);
   win.center();
 
-  // Перехват console рендерера → bootLog. Теперь видим всё, что
-  // рендерер пишет в DevTools, не открывая DevTools.
   win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
     const lvl = ['DEBUG', 'INFO', 'WARN', 'ERROR'][level] || 'LOG';
     bootLog(`[RENDERER:${lvl}] ${message}  (${sourceId}:${line})`);
   });
 
-  // DevTools по env или --devtools (по умолчанию отключено)
   if (process.env.LAKLY_DEVTOOLS === '1' || process.argv.includes('--devtools')) {
     win.webContents.openDevTools({ mode: 'detach' });
     bootLog('DevTools opened (detached)');
@@ -404,7 +443,7 @@ async function bootstrap() {
     if (!app.isQuitting) {
       e.preventDefault();
       win.hide();
-      if (roomActive) notify('LaklyCustom', 'Комната продолжает работать в трее');
+      if (roomActive) notify('LaklyCustom', tMain('notify.room_in_tray'));
     }
   });
 
@@ -432,18 +471,17 @@ app.whenReady()
   .then(bootstrap)
   .catch((err) => {
     bootLog(`FATAL: ${err?.stack || err}`);
-    try { dialog.showErrorBox('LaklyCustom не запустился', String(err?.stack || err?.message || err)); } catch {}
+    try {
+      dialog.showErrorBox(
+        tMain('dialog.fatal_title'),
+        String(err?.stack || err?.message || err)
+      );
+    } catch {}
     app.exit(1);
   });
 
 app.on('window-all-closed', () => { /* живём в трее */ });
 
-// ─── Завершение ───────────────────────────────────────────────
-// Проблема: 4-5 процессов LaklyCustom.exe (main + GPU + renderer + utility
-// + crashpad) не умирают, если srv.close() висит или cloudflared
-// не отвечает на SIGTERM. Решение:
-//   1. before-quit: останавливаем сервер с таймаутом 3с
-//   2. app.exit(0) → вызовет will-quit → там killProcessTree()
 let quitting = false;
 
 app.on('before-quit', async (e) => {
@@ -455,7 +493,6 @@ app.on('before-quit', async (e) => {
 
   destroyTray();
 
-  // Пытаемся корректно закрыть сервер (внутри остановит cloudflared, воркеры)
   try {
     await Promise.race([
       srv?.close?.(),
@@ -474,10 +511,6 @@ app.on('will-quit', () => {
   bootLog('will-quit: final cleanup');
   globalShortcut.unregisterAll();
   destroyTray();
-
-  // Молоток: убиваем всё дерево процессов.
-  // Это единственный надёжный способ гарантировать, что
-  // ни один LaklyCustom.exe не останется висеть в диспетчере.
   killProcessTree();
 });
 

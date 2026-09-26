@@ -38,7 +38,8 @@ export class Room {
     const list = [...this.players.values()].map(p => ({
       id: p.id, name: p.name, color: p.color, isHost: p.isHost,
     }));
-    list.unshift({ id: 'host', name: 'Хост', color: '#E5384F', isHost: true });
+    // Хост: name = null — клиент подставит перевод по isHost
+    list.unshift({ id: 'host', name: null, color: '#E5384F', isHost: true });
     return { players: list };
   }
 
@@ -92,10 +93,15 @@ export class Room {
     return null;
   }
 
+  // sender и text могут быть строкой ИЛИ {key, vars}.
+  // Клиент сам резолвит через свой i18n.
   addMessage(sender, color, text) {
     const msg = {
-      id: uuidv4(), sender, senderColor: color,
-      text, ts: Date.now(),
+      id: uuidv4(),
+      sender,
+      senderColor: color,
+      text,
+      ts: Date.now(),
     };
     this.messages.push(msg);
     if (this.messages.length > 200) this.messages.shift();

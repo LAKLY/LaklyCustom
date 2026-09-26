@@ -711,3 +711,22 @@ body {
   overflow: hidden; clip: rect(0,0,0,0);
   white-space: nowrap; border: 0;
 }
+
+/* ═══════════ PSEUDO-FULLSCREEN для гостя ═══════════ */
+.guest-game.pseudo-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  border-radius: 0;
+  border: 0;
+  margin: 0;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: auto;
+  background: var(--bg);
+}
+.guest-game:fullscreen {
+  border-radius: 0;
+  border: 0;
+  background: var(--bg);
+}

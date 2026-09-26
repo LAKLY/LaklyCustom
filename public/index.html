@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>LaklyCustom</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="/style.css?v=1.0.4">
+<link rel="stylesheet" href="/style.css?v=1.0.5">
+<script src="/i18n.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
@@ -16,22 +17,23 @@
     <img class="join-nika" src="/assets/nika/nika-welcome.png" alt=""
          onerror="this.style.display='none'">
     <h1 class="join-room-name" id="join-room-title">LaklyCustom</h1>
-    <p class="join-sub">Введите имя — и вы в комнате</p>
+    <p class="join-sub" data-i18n="guest.enter_name">Введите имя — и вы в комнате</p>
 
     <div class="join-form" id="join-form">
-      <label class="sr-only" for="player-name">Ваш ник</label>
-      <input id="player-name" placeholder="Ваш ник" maxlength="20" autofocus
+      <label class="sr-only" for="player-name" data-i18n="guest.name_placeholder">Ваш ник</label>
+      <input id="player-name" data-i18n-placeholder="guest.name_placeholder"
+             placeholder="Ваш ник" maxlength="20" autofocus
              autocomplete="off" spellcheck="false">
       <button id="btn-join" class="btn-join" type="button">
         <span class="btn-join-spinner" aria-hidden="true"></span>
-        <span class="btn-join-text" id="btn-join-text">Войти в комнату</span>
+        <span class="btn-join-text" id="btn-join-text" data-i18n="guest.join">Войти в комнату</span>
       </button>
       <div id="join-error" class="error" role="alert" aria-live="polite"></div>
     </div>
 
     <div class="join-footer">
       <img src="/assets/icon/icon-64.png" alt="" onerror="this.style.display='none'">
-      <span>LaklyCustom · играем вместе</span>
+      <span data-i18n="guest.footer">LaklyCustom · играем вместе</span>
     </div>
   </div>
 </div>
@@ -48,22 +50,23 @@
         <span class="guest-status" id="guest-status" data-status="connecting"
               role="status" aria-live="polite">
           <span class="guest-status-dot" aria-hidden="true"></span>
-          <span class="guest-status-text" id="guest-status-text">Подключение…</span>
+          <span class="guest-status-text" id="guest-status-text" data-i18n="status.connecting">Подключение…</span>
         </span>
         <span class="guest-self" id="player-self"></span>
       </div>
     </header>
 
     <div class="guest-players" id="players" aria-live="polite">
-      <div class="muted-text" style="padding:8px 0;font-size:12px;">Пока никого</div>
+      <div class="muted-text" style="padding:8px 0;font-size:12px;" data-i18n="room.no_players">Пока никого</div>
     </div>
 
     <div class="guest-game" id="game-block" hidden>
       <div class="guest-game-loading" id="game-loading">
         <div class="guest-game-spinner" aria-hidden="true"></div>
-        <div class="guest-game-loading-text">Загрузка игры…</div>
+        <div class="guest-game-loading-text" data-i18n="guest.loading_game">Загрузка игры…</div>
       </div>
       <button class="guest-game-fs" id="btn-game-fullscreen" type="button"
+              data-i18n-title="room.game_fullscreen" data-i18n-aria="room.game_fullscreen"
               aria-label="На весь экран" title="На весь экран">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
@@ -75,12 +78,13 @@
 
     <div class="guest-chat">
       <div id="chat" class="chat-list" aria-live="polite" aria-relevant="additions">
-        <div class="muted-text">Сообщений пока нет</div>
+        <div class="muted-text" data-i18n="room.no_messages">Сообщений пока нет</div>
       </div>
       <div class="chat-input-row">
-        <input id="chat-input" placeholder="Написать сообщение…" maxlength="200"
+        <input id="chat-input" data-i18n-placeholder="room.chat_placeholder"
+               placeholder="Написать сообщение…" maxlength="200"
                autocomplete="off" aria-label="Сообщение">
-        <button id="btn-send" type="button" aria-label="Отправить сообщение">→</button>
+        <button id="btn-send" type="button" aria-label="Отправить">→</button>
       </div>
     </div>
   </div>
@@ -90,11 +94,11 @@
 <div id="closed-screen" class="screen" hidden>
   <div class="closed-card">
     <img src="/assets/nika/nika-sleep.png" alt="" onerror="this.style.display='none'">
-    <h1>Комната закрыта</h1>
-    <p>Хост завершил сессию</p>
+    <h1 data-i18n="guest.closed_title">Комната закрыта</h1>
+    <p data-i18n="guest.closed_sub">Хост завершил сессию</p>
   </div>
 </div>
 
-<script src="/client.js?v=1.0.4"></script>
+<script src="/client.js?v=1.0.5"></script>
 </body>
 </html>

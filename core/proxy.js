@@ -112,22 +112,63 @@ export function createProxyServer() {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
     });
-    res.end(buildErrorHtml(code));
+    res.end(buildErrorHtml(code, pickLang(req)));
   });
 
   return proxy;
 }
 
-function buildErrorHtml(code) {
-  const hint =
-    code === 'ECONNREFUSED' ? 'Порт закрыт — приложение, скорее всего, не запущено.'
-    : code === 'ECONNRESET' ? 'Соединение сброшено. Dev-сервер закрыл связь.'
-    : code === 'ETIMEDOUT'  ? 'Локальный сервер не ответил за отведённое время.'
-    : 'LaklyCustom не смог подключиться к локальному порту.';
+// ─── Мини-словарь для HTML страницы ошибки ──────────────────
+// Специально не тянем shared/locales — HTML живёт вне клиента,
+// а перевод нужен только 8 строк. Хардкодом тут дешевле.
+const PROXY_ERROR_STRINGS = {
+  ru: {
+    title: 'Локальный сервер не отвечает',
+    econnrefused: 'Порт закрыт — приложение, скорее всего, не запущено.',
+    econnreset: 'Соединение сброшено. Dev-сервер закрыл связь.',
+    etimedout: 'Локальный сервер не ответил за отведённое время.',
+    other: 'LaklyCustom не смог подключиться к локальному порту.',
+    check_running: 'Проверьте, что dev-сервер запущен и слушает <code>127.0.0.1</code>.',
+    host_flag: 'Если порт открыт, попробуйте запустить его с флагом <code>--host 0.0.0.0</code>.',
+    reload: 'Обновить',
+    code: 'Код',
+  },
+  en: {
+    title: 'Local server is not responding',
+    econnrefused: 'Port is closed — the app is probably not running.',
+    econnreset: 'Connection reset. The dev server closed the connection.',
+    etimedout: 'Local server did not respond in time.',
+    other: 'LaklyCustom could not connect to the local port.',
+    check_running: 'Check that the dev server is running and listening on <code>127.0.0.1</code>.',
+    host_flag: 'If the port is open, try starting it with <code>--host 0.0.0.0</code>.',
+    reload: 'Reload',
+    code: 'Code',
+  },
+};
 
-  return `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
+function pickLang(req) {
+  try {
+    const url = new URL(req?.url || '/', 'http://localhost');
+    const qp = url.searchParams.get('lang');
+    if (qp === 'en' || qp === 'ru') return qp;
+  } catch {}
+  const al = String(req?.headers?.['accept-language'] || '').toLowerCase();
+  if (al.startsWith('ru')) return 'ru';
+  return 'en';
+}
+
+function buildErrorHtml(code, lang = 'en') {
+  const s = PROXY_ERROR_STRINGS[lang] || PROXY_ERROR_STRINGS.en;
+
+  const hint =
+    code === 'ECONNREFUSED' ? s.econnrefused
+    : code === 'ECONNRESET' ? s.econnreset
+    : code === 'ETIMEDOUT'  ? s.etimedout
+    : s.other;
+
+  return `<!DOCTYPE html><html lang="${lang}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Локальный сервер не отвечает</title>
+<title>${s.title}</title>
 <style>
   html,body{height:100%;margin:0}
   body{
@@ -146,11 +187,11 @@ function buildErrorHtml(code) {
   .code{margin-top:16px;font-size:11.5px;color:#6F687D;font-family:ui-monospace,Consolas,monospace}
 </style></head><body>
 <div class="card">
-  <h1>Локальный сервер не отвечает</h1>
+  <h1>${s.title}</h1>
   <p>${hint}</p>
-  <p>Проверьте, что dev-сервер запущен и слушает <code>127.0.0.1</code>.</p>
-  <p>Если порт открыт, попробуйте запустить его с флагом <code>--host 0.0.0.0</code>.</p>
-  <button onclick="location.reload()">Обновить</button>
-  <div class="code">Код: ${code}</div>
+  <p>${s.check_running}</p>
+  <p>${s.host_flag}</p>
+  <button onclick="location.reload()">${s.reload}</button>
+  <div class="code">${s.code}: ${code}</div>
 </div></body></html>`;
 }

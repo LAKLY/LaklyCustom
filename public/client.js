@@ -1,6 +1,17 @@
+// public/client.js
 const joinToken = new URLSearchParams(location.search).get('t') || '';
 const socket = io({ reconnectionDelayMax: 5000 });
 const $ = id => document.getElementById(id);
+
+// ─── i18n helpers ───────────────────────────────────────────
+const t = (key, vars) => (window.LaklyI18n?.t(key, vars)) || key;
+
+// Серверные сообщения: строка-ключ или {key, vars}
+function resolveMsg(msg) {
+  if (typeof msg === 'string') return t(msg);
+  if (msg && typeof msg === 'object' && msg.key) return t(msg.key, msg.vars);
+  return t('error.generic');
+}
 
 let me = null;
 let lastPlayerName = '';
@@ -8,11 +19,11 @@ let messages = [];
 let activeGame = null;
 let lastGameState = null;
 
-// ─── Игроки (дифференциальный рендер) ────────────────────
-const playerNodes = new Map();     // playerId -> HTMLElement
+// ─── Игроки (дифференциальный рендер) ──────────────────────
+const playerNodes = new Map();
 const PLAYER_LEAVE_MS = 320;
 
-// ─── Экран ───────────────────────────────────────────────
+// ─── Экран ──────────────────────────────────────────────────
 function show(screenId) {
   ['join-screen', 'room-screen', 'closed-screen'].forEach(id => {
     const el = document.getElementById(id);
@@ -21,25 +32,24 @@ function show(screenId) {
 }
 show('join-screen');
 
-// ─── Статус соединения ───────────────────────────────────
+// ─── Статус соединения ──────────────────────────────────────
 function setSocketStatus(status) {
   const el = $('guest-status');
   const txt = $('guest-status-text');
   if (!el || !txt) return;
   el.dataset.status = status;
   txt.textContent =
-    status === 'online'     ? 'Онлайн' :
-    status === 'connecting' ? 'Подключение…' :
-                              'Нет соединения';
+    status === 'online'     ? t('status.online') :
+    status === 'connecting' ? t('status.connecting') :
+                              t('status.offline');
 
-  // На join-экране — управляем доступностью кнопки.
   const btn = $('btn-join');
   if (btn && btn.dataset.state === 'idle') {
     btn.disabled = status === 'offline';
   }
 }
 
-// ─── Превью комнаты на join-экране ───────────────────────
+// ─── Превью комнаты на join-экране ─────────────────────────
 async function loadRoomPreview() {
   try {
     const r = await fetch('/api/room');
@@ -51,7 +61,7 @@ async function loadRoomPreview() {
   } catch {}
 }
 
-// ─── Join: машина состояний кнопки ───────────────────────
+// ─── Join: машина состояний кнопки ─────────────────────────
 function setJoinButton(state, text) {
   const btn = $('btn-join');
   const label = $('btn-join-text');
@@ -71,7 +81,7 @@ function join() {
   const name = (input?.value || '').trim();
 
   if (!name) {
-    $('join-error').textContent = 'Введите имя';
+    $('join-error').textContent = t('guest.enter_name_err');
     const form = $('join-form');
     if (form) {
       form.classList.remove('shake');
@@ -84,14 +94,13 @@ function join() {
 
   $('join-error').textContent = '';
   lastPlayerName = name;
-  setJoinButton('connecting', 'Подключение…');
+  setJoinButton('connecting', t('guest.joining'));
 
-  // Если сервер не ответит за 15 сек — возвращаем кнопку в idle.
   clearTimeout(joinTimeoutTimer);
   joinTimeoutTimer = setTimeout(() => {
     if (me) return;
-    setJoinButton('idle', 'Войти в комнату');
-    $('join-error').textContent = 'Сервер не отвечает. Попробуйте ещё раз.';
+    setJoinButton('idle', t('guest.join'));
+    $('join-error').textContent = t('guest.server_timeout');
   }, 15_000);
 
   socket.emit('player:join', { playerName: name, token: joinToken });
@@ -102,20 +111,20 @@ $('player-name').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); join(); }
 });
 
-// ─── Чат ─────────────────────────────────────────────────
+// ─── Чат ────────────────────────────────────────────────────
 $('btn-send').onclick = send;
 $('chat-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); send(); }
 });
 
 function send() {
-  const t = ($('chat-input').value || '').trim();
-  if (!t) return;
-  socket.emit('chat:message', { text: t });
+  const val = ($('chat-input').value || '').trim();
+  if (!val) return;
+  socket.emit('chat:message', { text: val });
   $('chat-input').value = '';
 }
 
-// ═══════════ FULLSCREEN ИГРЫ ═══════════
+// ═══════════ FULLSCREEN ═══════════
 const btnGameFs = $('btn-game-fullscreen');
 
 async function toggleGameFullscreen() {
@@ -139,7 +148,9 @@ function updateFsButton() {
   const target = $('game-block');
   const active = !!document.fullscreenElement ||
                  target?.classList.contains('pseudo-fullscreen');
-  btnGameFs.title = active ? 'Выйти из полноэкранного режима' : 'На весь экран';
+  const label = active ? t('room.game_fullscreen_exit') : t('room.game_fullscreen');
+  btnGameFs.title = label;
+  btnGameFs.setAttribute('aria-label', label);
   btnGameFs.classList.toggle('is-active', active);
 }
 
@@ -148,11 +159,8 @@ document.addEventListener('fullscreenchange', updateFsButton);
 
 // ═══════════ SOCKET ═══════════
 socket.on('connect', () => {
-  console.log('[guest] socket connected');
   setSocketStatus('online');
 
-  // Автореконнект: если мы уже были в комнате, но связь упала —
-  // переподключаемся молча, под тем же именем.
   if (me && lastPlayerName) {
     socket.emit('player:join', { playerName: lastPlayerName, token: joinToken });
     return;
@@ -163,14 +171,11 @@ socket.on('connect', () => {
 socket.io.on('reconnect_attempt', () => setSocketStatus('connecting'));
 socket.io.on('reconnect_failed', () => setSocketStatus('offline'));
 
-socket.on('disconnect', (reason) => {
-  console.log('[guest] socket disconnected:', reason);
+socket.on('disconnect', () => {
   setSocketStatus('offline');
-  // socket.io сам переподключится — модалки не показываем.
 });
 
 socket.on('player:joined-success', (data) => {
-  console.log('[guest] joined successfully', data);
   clearTimeout(joinTimeoutTimer);
   me = data;
   lastPlayerName = data.playerName;
@@ -178,11 +183,10 @@ socket.on('player:joined-success', (data) => {
   $('player-self').textContent = data.playerName || '—';
   $('player-self').style.color = data.playerColor || 'inherit';
 
-  // Скрываем чат, если хост отключил его при создании комнаты.
   const chatEl = document.querySelector('.guest-chat');
   if (chatEl) chatEl.hidden = data.chatEnabled === false;
 
-  setJoinButton('joined', 'Войти в комнату');
+  setJoinButton('joined', t('guest.join'));
   show('room-screen');
 
   if (data.gameActive && data.activePlugin) showGame(data.activePlugin);
@@ -204,24 +208,21 @@ socket.on('room:closed', () => {
   show('closed-screen');
 });
 socket.on('player:kicked', () => {
-  alert('Вас исключили из комнаты');
+  alert(t('guest.kicked'));
   me = null;
   resetRoomUI();
   show('closed-screen');
 });
 
 socket.on('error', (msg) => {
-  console.log('[guest] server error:', msg);
   clearTimeout(joinTimeoutTimer);
-  const text = typeof msg === 'string' ? msg : 'Ошибка';
+  const text = resolveMsg(msg);
 
-  // Если мы ещё не в комнате — ошибка про join, показываем на join-экране.
   if (!me) {
     $('join-error').textContent = text;
-    setJoinButton('idle', 'Войти в комнату');
+    setJoinButton('idle', t('guest.join'));
     return;
   }
-  // Иначе — не рушим UI, просто тост-подобное поведение в шапке.
   setSocketStatus('offline');
 });
 
@@ -245,15 +246,12 @@ function showGame(plugin, url) {
   const frame = $('game-frame');
   const loading = $('game-loading');
 
-  // Показываем оверлей, пока iframe не пришлёт lakly:ready.
   if (loading) loading.hidden = false;
   block.classList.add('loading');
 
   frame.src = url || `/plugins/${plugin}/game.html`;
   block.hidden = false;
 
-  // Страховка: если плагин не прислал ready за 12 сек — снимаем оверлей,
-  // чтобы гость не смотрел в бесконечный спиннер.
   clearTimeout(gameLoadingTimer);
   gameLoadingTimer = setTimeout(() => {
     if (!loading) return;
@@ -273,7 +271,6 @@ function hideGame() {
   block.hidden = true;
   $('game-frame').src = 'about:blank';
 
-  // Сбрасываем fullscreen, если был активен.
   block.classList.remove('pseudo-fullscreen');
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 }
@@ -284,7 +281,6 @@ window.addEventListener('message', (e) => {
   if (!e.data || typeof e.data !== 'object') return;
 
   if (e.data.type === 'lakly:ready') {
-    // Игра готова — убираем оверлей и shimmer.
     clearTimeout(gameLoadingTimer);
     const loading = $('game-loading');
     const block = $('game-block');
@@ -304,7 +300,7 @@ window.addEventListener('message', (e) => {
   }
 });
 
-// ═══════════ RENDER: игроки (diff) ═══════════
+// ═══════════ RENDER: игроки ═══════════
 async function refresh() {
   try {
     const r = await fetch('/api/room');
@@ -313,14 +309,21 @@ async function refresh() {
   } catch {}
 }
 
+function playerDisplayName(p) {
+  if (p.name) return p.name;
+  if (p.isHost) return t('room.host_name');
+  return '?';
+}
+
 function createPlayerNode(p) {
-  const initial = (p.name || '?').trim().charAt(0).toUpperCase();
+  const name = playerDisplayName(p);
+  const initial = name.trim().charAt(0).toUpperCase();
   const node = document.createElement('div');
   node.className = 'guest-player';
   node.dataset.playerId = p.id;
   node.innerHTML = `
     <span class="avatar" style="background:${p.color};color:${p.color}">${esc(initial)}</span>
-    <span class="player-name">${esc(p.name)}</span>
+    <span class="player-name">${esc(name)}</span>
   `;
   return node;
 }
@@ -329,7 +332,6 @@ function renderPlayers(list) {
   const el = $('players');
   if (!el) return;
 
-  // Убираем «Пока никого», если появились игроки.
   if (list.length) {
     const empty = el.querySelector('.muted-text');
     if (empty) empty.remove();
@@ -347,16 +349,16 @@ function renderPlayers(list) {
     } else {
       const nameEl = node.querySelector('.player-name');
       const avEl = node.querySelector('.avatar');
-      if (nameEl && nameEl.textContent !== p.name) nameEl.textContent = p.name;
+      const name = playerDisplayName(p);
+      if (nameEl && nameEl.textContent !== name) nameEl.textContent = name;
       if (avEl) {
-        avEl.textContent = (p.name || '?').trim().charAt(0).toUpperCase();
+        avEl.textContent = name.trim().charAt(0).toUpperCase();
         avEl.style.background = p.color;
         avEl.style.color = p.color;
       }
     }
   }
 
-  // Ушли — плавно удаляем.
   for (const [id, node] of playerNodes) {
     if (seen.has(id)) continue;
     playerNodes.delete(id);
@@ -365,21 +367,21 @@ function renderPlayers(list) {
   }
 
   if (!list.length && !el.children.length) {
-    el.innerHTML = '<div class="muted-text" style="padding:8px 0;font-size:12px;">Пока никого</div>';
+    el.innerHTML = `<div class="muted-text" style="padding:8px 0;font-size:12px;">${esc(t('room.no_players'))}</div>`;
   }
 }
 
 function resetRoomUI() {
   playerNodes.clear();
   const el = $('players');
-  if (el) el.innerHTML = '<div class="muted-text" style="padding:8px 0;font-size:12px;">Пока никого</div>';
+  if (el) el.innerHTML = `<div class="muted-text" style="padding:8px 0;font-size:12px;">${esc(t('room.no_players'))}</div>`;
   messages = [];
   const chat = $('chat');
-  if (chat) chat.innerHTML = '<div class="muted-text">Сообщений пока нет</div>';
+  if (chat) chat.innerHTML = `<div class="muted-text">${esc(t('room.no_messages'))}</div>`;
   hideGame();
 }
 
-// ═══════════ RENDER: чат с сохранением позиции скролла ═══════════
+// ═══════════ RENDER: чат ═══════════
 function isNearBottom(el, threshold = 60) {
   return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
 }
@@ -389,7 +391,7 @@ function renderChat() {
   if (!el) return;
 
   if (!messages.length) {
-    el.innerHTML = '<div class="muted-text">Сообщений пока нет</div>';
+    el.innerHTML = `<div class="muted-text">${esc(t('room.no_messages'))}</div>`;
     return;
   }
 
@@ -397,15 +399,20 @@ function renderChat() {
   const wasNearBottom = isNearBottom(el);
 
   el.innerHTML = messages.map(m => {
-    const mine = me && m.sender === me.playerName ? ' mine' : '';
+    const mine = me && typeof m.sender === 'string' && m.sender === me.playerName ? ' mine' : '';
+    const who = (m.sender && typeof m.sender === 'object')
+      ? resolveMsg(m.sender)
+      : (m.sender || '');
+    const what = (m.text && typeof m.text === 'object')
+      ? resolveMsg(m.text)
+      : (m.text || '');
     return `
       <div class="msg${mine}">
-        <span class="who" style="color:${m.senderColor}">${esc(m.sender)}</span>
-        <span>${esc(m.text)}</span>
+        <span class="who" style="color:${m.senderColor}">${esc(who)}</span>
+        <span>${esc(what)}</span>
       </div>`;
   }).join('');
 
-  // Вниз прыгаем только если пользователь и так был у нижней границы.
   if (wasNearBottom) {
     el.scrollTop = el.scrollHeight;
   } else {
@@ -419,8 +426,32 @@ function esc(s) {
   }[c]));
 }
 
+// Перерисовать после смены языка
+if (window.LaklyI18n) {
+  window.LaklyI18n.onChange(() => {
+    try { setSocketStatus(socket.connected ? 'online' : 'connecting'); } catch {}
+    try { renderChat(); } catch {}
+    try {
+      const btn = $('btn-join');
+      if (btn) {
+        const state = btn.dataset.state || 'idle';
+        if (state === 'idle') setJoinButton('idle', t('guest.join'));
+        else if (state === 'connecting') setJoinButton('connecting', t('guest.joining'));
+        else if (state === 'joined') setJoinButton('joined', t('guest.join'));
+      }
+    } catch {}
+    try { updateFsButton(); } catch {}
+  });
+}
+
 // ═══════════ СТАРТ ═══════════
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+  try {
+    if (window.LaklyI18n) await window.LaklyI18n.init();
+  } catch (err) {
+    console.error('[guest] i18n init failed:', err);
+  }
+
   show('join-screen');
   setSocketStatus(socket.connected ? 'online' : 'connecting');
   loadRoomPreview();
